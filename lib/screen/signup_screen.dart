@@ -6,6 +6,42 @@ import 'package:delivery_boy_app/widgets/auth_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+// ─── What this screen does and what changed ──────────────────────────────────
+// SignupScreen registers a new driver account with four fields:
+// full name, email, phone number, and password.
+//
+// Fields added / changed from the original design:
+//   • Email was added as a required field. It is stored in the database and
+//     used as the login credential (drivers now log in with email + password
+//     instead of phone + password).
+//   • The backend's POST /api/drivers/signup endpoint was updated in parallel
+//     to accept and store the email, and a database migration
+//     (ALTER TABLE drivers ADD COLUMN email VARCHAR(150) UNIQUE) was run on
+//     the production Railway Postgres instance to add the column.
+//
+// Visual changes from the original design:
+//   • The default Material AppBar was removed and replaced with AuthHeader —
+//     the same red wave component used on LoginScreen — so both screens share
+//     a consistent branded appearance.
+//   • The header uses heightFactor 0.32 (vs login's 0.38) so it occupies less
+//     vertical space, leaving sufficient room for four input fields without
+//     the screen feeling cramped.
+//   • All four TextFields were replaced with AuthInputField widgets (defined in
+//     auth_widgets.dart): filled background, rounded borders, prefix icons, and
+//     a red focus highlight matching the app theme.
+//   • The password field gained a show/hide visibility toggle.
+//   • A SingleChildScrollView wraps the entire body. This fixes a
+//     "BOTTOM OVERFLOWED BY 53 PIXELS" crash that occurred when the soft
+//     keyboard appeared and pushed the four-field layout out of bounds.
+//   • The "Back to login" TextButton was replaced with an inline
+//     "Already have an account? Log In" row for visual consistency with
+//     the login screen's sign-up link.
+//
+// Validation strategy: client-side empty check and email regex run before the
+// network call so the driver gets instant feedback without waiting for a round
+// trip. The backend validates the same rules again as a second guard.
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Signup screen — redesigned to match the login screen's visual style.
 // Uses the same shared widgets from auth_widgets.dart (AuthHeader, AuthInputField,
 // AuthButton) so both screens stay visually consistent.

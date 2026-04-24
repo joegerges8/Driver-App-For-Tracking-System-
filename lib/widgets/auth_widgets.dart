@@ -1,6 +1,43 @@
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:flutter/material.dart';
 
+// ─── Design rationale ────────────────────────────────────────────────────────
+// The original login and signup screens were plain Material TextFields with no
+// visual identity — just labels and a basic button. This file introduces a
+// shared widget library following the DRY (Don't Repeat Yourself) principle:
+// instead of duplicating the same styled components in two separate screen
+// files, all reusable UI building blocks live here as a single source of truth.
+//
+// Three components are exported:
+//
+//   AuthHeader   — A full-width red branded section at the top of each screen.
+//                  It uses Flutter's ClipPath + CustomClipper API to draw a
+//                  quadratic Bezier curve along the bottom edge, creating a
+//                  smooth wave transition from red into the white form area.
+//                  The wave shape and the red colour (buttonMainColor) directly
+//                  match the rest of the app's theme (buttons, profile avatar,
+//                  bottom-nav highlight). heightFactor is a parameter so login
+//                  (0.38) and signup (0.32) can tune the header height
+//                  independently — signup needs less room because it has four
+//                  form fields below.
+//
+//   AuthInputField — A styled TextField with three explicit border states:
+//                  no border (fallback), a subtle grey outline when unfocused,
+//                  and a red outline (buttonMainColor) when the field is active.
+//                  A coloured prefix icon gives each field instant visual
+//                  context (envelope for email, lock for password, etc.).
+//                  An optional suffixIcon slot allows password fields to attach
+//                  a show/hide visibility toggle without needing a separate
+//                  widget subclass.
+//
+//   AuthButton   — A full-width elevated button that automatically swaps its
+//                  label for a circular progress indicator while the auth
+//                  network call is in flight, preventing duplicate submissions.
+//                  disabledBackgroundColor is set explicitly because Flutter's
+//                  default disabled state ignores a custom backgroundColor,
+//                  which would make the button look unstyled when loading.
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Shared widgets used by LoginScreen and SignupScreen.
 // Extracted into one file so both screens stay thin and the visual language
 // (colours, border radius, wave shape) stays consistent in one place.

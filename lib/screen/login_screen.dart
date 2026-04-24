@@ -7,6 +7,31 @@ import 'package:delivery_boy_app/widgets/auth_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+// ─── What this screen does and what changed ──────────────────────────────────
+// LoginScreen authenticates a driver using their email address and password.
+// Login was previously phone-based; it was changed to email so the credentials
+// are consistent with the signup form, which collects email as a required field.
+//
+// Visual changes from the original design:
+//   • The default Material AppBar was removed. The AuthHeader widget (defined in
+//     auth_widgets.dart) replaces it with a full-bleed red wave section that
+//     fills the top 38% of the screen, giving the screen a strong branded look
+//     that matches the app's red colour scheme.
+//   • Plain TextFields were replaced with AuthInputField widgets: filled grey
+//     background, rounded corners, a coloured prefix icon, and a red focus
+//     border — consistent with the rest of the redesigned auth flow.
+//   • The password field gained a show/hide visibility toggle so drivers can
+//     verify what they typed before submitting.
+//   • The "Create an account" TextButton at the bottom was replaced with an
+//     inline "Don't have an account? Sign Up" row, which is a common pattern
+//     in modern mobile auth screens and is less visually heavy than a button.
+//   • A SingleChildScrollView wraps the body so the form scrolls correctly
+//     when the soft keyboard appears on smaller devices.
+//
+// Logic is unchanged: _submit() reads from AuthProvider, which calls
+// POST /api/drivers/login and stores the JWT in SharedPreferences.
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Login screen — redesigned with a red wave header and styled input fields.
 // The AppBar is removed so the full-bleed AuthHeader acts as the visual title.
 // All three shared widgets (AuthHeader, AuthInputField, AuthButton) come from
