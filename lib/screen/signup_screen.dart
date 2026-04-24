@@ -1,13 +1,18 @@
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/route.dart';
 import 'package:delivery_boy_app/screen/app_main_screen.dart';
+import 'package:delivery_boy_app/utils/colors.dart';
+import 'package:delivery_boy_app/widgets/auth_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-// Signup screen — collects full name, email, phone, and password.
-// Email was added to the form alongside phone so the backend can store and
-// display it on the driver's profile. Validation runs client-side first
-// (empty check + regex) and the backend validates again as a second guard.
+// Signup screen — redesigned to match the login screen's visual style.
+// Uses the same shared widgets from auth_widgets.dart (AuthHeader, AuthInputField,
+// AuthButton) so both screens stay visually consistent.
+// heightFactor 0.32 (vs login's 0.38) gives the header less height to leave
+// more room for the four input fields below.
+// Validation runs client-side first (empty check + email regex), then the
+// backend validates again as a second guard.
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
 
@@ -20,6 +25,7 @@ class _SignupScreenState extends State<SignupScreen> {
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
+  bool _obscurePassword = true;
 
   @override
   void dispose() {
@@ -49,9 +55,12 @@ class _SignupScreenState extends State<SignupScreen> {
     }
 
     try {
-      await context
-          .read<AuthProvider>()
-          .signup(fullName: fullName, email: email, phone: phone, password: password);
+      await context.read<AuthProvider>().signup(
+            fullName: fullName,
+            email: email,
+            phone: phone,
+            password: password,
+          );
       if (!mounted) return;
       NavigationHelper.pushReplacement(context, const AppMainScreen());
     } catch (e) {
@@ -71,58 +80,111 @@ class _SignupScreenState extends State<SignupScreen> {
     final auth = context.watch<AuthProvider>();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Driver Signup')),
-      // SingleChildScrollView replaces the plain Padding that was here before.
-      // When the keyboard appears it pushes the layout up, causing a
-      // "BOTTOM OVERFLOWED BY 53 PIXELS" error with four fields. Scrollable
-      // body lets the form slide up without clipping.
+      backgroundColor: Colors.white,
+      // No AppBar — AuthHeader replaces it with the red wave section.
+      // SingleChildScrollView prevents the "BOTTOM OVERFLOWED" error that
+      // occurred with a plain Column when the keyboard pushed four fields up.
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
-              controller: _fullNameController,
-              decoration: const InputDecoration(labelText: 'Full name'),
-              textCapitalization: TextCapitalization.words,
+            // Slightly shorter header than login since the form has more fields.
+            AuthHeader(
+              icon: Icons.person_add_outlined,
+              title: 'Create Account',
+              subtitle: 'Join the delivery team',
+              heightFactor: 0.32,
             ),
-            const SizedBox(height: 12),
-            // autocorrect: false prevents the keyboard from mangling email addresses.
-            TextField(
-              controller: _emailController,
-              keyboardType: TextInputType.emailAddress,
-              autocorrect: false,
-              decoration: const InputDecoration(labelText: 'Email'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _phoneController,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(labelText: 'Phone'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _passwordController,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Password'),
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: auth.isBusy ? null : _submit,
-                child: auth.isBusy
-                    ? const SizedBox(
-                        height: 18,
-                        width: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Sign up'),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(28, 12, 28, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Sign Up',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Fill in your details to get started',
+                    style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                  ),
+                  const SizedBox(height: 24),
+                  AuthInputField(
+                    controller: _fullNameController,
+                    label: 'Full Name',
+                    icon: Icons.person_outline,
+                    textCapitalization: TextCapitalization.words,
+                  ),
+                  const SizedBox(height: 14),
+                  // autocorrect disabled so the keyboard doesn't mangle email addresses.
+                  AuthInputField(
+                    controller: _emailController,
+                    label: 'Email',
+                    icon: Icons.email_outlined,
+                    keyboardType: TextInputType.emailAddress,
+                    autocorrect: false,
+                  ),
+                  const SizedBox(height: 14),
+                  AuthInputField(
+                    controller: _phoneController,
+                    label: 'Phone',
+                    icon: Icons.phone_outlined,
+                    keyboardType: TextInputType.phone,
+                  ),
+                  const SizedBox(height: 14),
+                  // Password field with show/hide toggle.
+                  AuthInputField(
+                    controller: _passwordController,
+                    label: 'Password',
+                    icon: Icons.lock_outline,
+                    obscureText: _obscurePassword,
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        color: Colors.grey,
+                        size: 20,
+                      ),
+                      onPressed: () =>
+                          setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  AuthButton(
+                    label: 'Create Account',
+                    loading: auth.isBusy,
+                    onPressed: _submit,
+                  ),
+                  const SizedBox(height: 20),
+                  // Inline back-to-login link.
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'Already have an account?  ',
+                        style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                      ),
+                      GestureDetector(
+                        onTap: auth.isBusy ? null : () => Navigator.pop(context),
+                        child: Text(
+                          'Log In',
+                          style: TextStyle(
+                            color: buttonMainColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                ],
               ),
-            ),
-            const SizedBox(height: 12),
-            TextButton(
-              onPressed: auth.isBusy ? null : () => Navigator.pop(context),
-              child: const Text('Back to login'),
             ),
           ],
         ),
