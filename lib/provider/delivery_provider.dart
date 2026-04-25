@@ -111,7 +111,12 @@ class DeliveryProvider extends ChangeNotifier {
           parsed.add(OrderModel.fromBackend(item));
         }
       }
-      _orders = parsed;
+      // Filter out orders the driver has already delivered locally. This prevents
+      // a race condition where the PATCH request to mark an order DELIVERED hasn't
+      // reached the server yet by the time refreshMyOrders runs, causing the
+      // order to reappear in the list from the backend response.
+      final completedIds = _completedOrders.map((o) => o.id).toSet();
+      _orders = parsed.where((o) => !completedIds.contains(o.id)).toList();
       _currentOrder = _orders.isNotEmpty ? _orders.first : null;
       _status = DeliveryStatus.waitingForAcceptance;
       _pickupLocation = null;
@@ -146,10 +151,16 @@ class DeliveryProvider extends ChangeNotifier {
           parsed.add(OrderModel.fromBackend(item));
         }
       }
-      _completedOrders = parsed;
+      // Merge: keep locally-completed orders that the backend doesn't know about
+      // yet (the DELIVERED PATCH may still be in-flight). Without this, opening
+      // the Done tab would wipe out the order the driver just delivered.
+      final fetchedIds = parsed.map((o) => o.id).toSet();
+      _completedOrders = [
+        ...parsed,
+        ..._completedOrders.where((o) => !fetchedIds.contains(o.id)),
+      ];
     } catch (e) {
       _completedError = e.toString();
-      _completedOrders = [];
     } finally {
       _isLoadingCompleted = false;
       notifyListeners();
@@ -261,14 +272,56 @@ class DeliveryProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Updates UI immediately, then syncs the status to the backend.
+  // Throws if the network call fails so the caller can show an error to the driver.
+  Future<void> markPickedUp({required String token}) async {
+    final orderId = _currentOrder?.id;
+    markAsPickedUp(); // instant UI update
+    if (orderId == null || orderId.isEmpty) return;
+    try {
+      await ApiClient.updateOrderStatus(
+        token: token,
+        orderId: orderId,
+        status: 'PICKED_UP',
+      );
+    } catch (e) {
+      rethrow; // caller shows error snackbar
+    }
+  }
+
   // Called when the driver taps "Mark as Delivered".
   void markAdDelivered() {
     _status = DeliveryStatus.markingAsDelivered;
     notifyListeners();
   }
 
+  // Updates UI immediately, then syncs DELIVERED to the backend.
+  // Throws if the network call fails so the caller can show an error to the driver.
+  Future<void> markDelivered({required String token}) async {
+    final orderId = _currentOrder?.id;
+    completeDeliveery(); // instant UI update — removes from pending, adds to completed
+    if (orderId == null || orderId.isEmpty) return;
+    try {
+      await ApiClient.updateOrderStatus(
+        token: token,
+        orderId: orderId,
+        status: 'DELIVERED',
+      );
+    } catch (e) {
+      rethrow; // caller shows error snackbar
+    }
+  }
+
   // Called after the backend confirms the delivery — order is fully complete.
+  // Removes the order from the pending list and prepends it to completedOrders
+  // so the Completed tab and earnings strip update immediately without a refetch.
   void completeDeliveery() {
+    if (_currentOrder != null) {
+      _orders.removeWhere((o) => o.id == _currentOrder!.id);
+      if (!_completedOrders.any((o) => o.id == _currentOrder!.id)) {
+        _completedOrders = [_currentOrder!, ..._completedOrders];
+      }
+    }
     _status = DeliveryStatus.delivered;
     notifyListeners();
   }

@@ -70,6 +70,23 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
     super.dispose();
   }
 
+  // Awaits a status-update Future and shows a snackbar when it fails.
+  // Written as a proper async method so mounted/context/ScaffoldMessenger
+  // are in scope as normal State members, not inside a closure.
+  Future<void> _syncStatus(Future<void> update) async {
+    try {
+      await update;
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Status sync failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   static bool _isValidLatLng(LatLng? p) {
     if (p == null) return false;
     if (p.latitude.abs() < 0.001 || p.longitude.abs() < 0.001) return false;
@@ -412,9 +429,10 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
                           order: provider.currentOrder!,
                           status: provider.status,
                           onButtonPressed: () {
+                            final authToken = context.read<AuthProvider>().token ?? '';
                             switch (provider.status) {
                               case DeliveryStatus.pickingUp:
-                                provider.markAsPickedUp();
+                                _syncStatus(provider.markPickedUp(token: authToken));
                                 // Open external turn-by-turn navigation to the customer's location.
                                 final dest = provider.currentOrder?.deliveryLocation;
                                 if (dest != null) {
@@ -427,7 +445,7 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
                                 provider.markAdDelivered();
                                 break;
                               case DeliveryStatus.markingAsDelivered:
-                                provider.completeDeliveery();
+                                _syncStatus(provider.markDelivered(token: authToken));
                                 break;
                               default:
                                 break;

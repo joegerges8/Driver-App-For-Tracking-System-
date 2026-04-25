@@ -183,6 +183,35 @@ class ApiClient {
     );
   }
 
+  static Future<void> updateOrderStatus({
+    required String token,
+    required String orderId,
+    required String status,
+  }) async {
+    http.Response res;
+    try {
+      res = await http.patch(
+        _uri('/api/drivers/me/orders/$orderId/status'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'status': status}),
+      );
+    } catch (e) {
+      throw ApiException('Network error: $e');
+    }
+
+    if (res.statusCode >= 200 && res.statusCode < 300) return;
+
+    String? message;
+    try {
+      final body = _decodeJson(res);
+      message = _errorMessage(body);
+    } catch (_) {}
+    throw ApiException(message ?? 'Failed to update order status (HTTP ${res.statusCode})');
+  }
+
   static Future<List<dynamic>> getMyOrders({required String token}) async {
     http.Response res;
     try {

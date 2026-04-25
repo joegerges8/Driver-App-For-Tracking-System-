@@ -146,7 +146,7 @@ class _OrdersScreenState extends State<OrdersScreen>
             Tab(text: 'All (${delivery.orders.length})'),
             Tab(text: 'Pending (${pendingOrders.length})'),
             Tab(text: 'Active (${activeOrders.length})'),
-            Tab(text: 'Done (${delivery.completedOrders.length})'),
+            Tab(text: 'Completed (${delivery.completedOrders.length})'),
           ],
         ),
       ),
