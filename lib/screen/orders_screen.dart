@@ -94,7 +94,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 return ListTile(
                   title: Text(order.item),
                   subtitle: Text(order.deliveryAddress),
-                  trailing: Text('₹${order.price}'),
+                  trailing: Text('\$${order.price}'),
                   selected: isSelected,
                   onTap: () {
                     context.read<DeliveryProvider>().setCurrentOrder(order);

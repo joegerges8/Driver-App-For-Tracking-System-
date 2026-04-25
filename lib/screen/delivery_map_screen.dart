@@ -44,6 +44,9 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
   LatLng? _lastOriginForRoute;
   DateTime? _lastRouteFetchAt;
 
+  // The same key used by Maps SDK for Android — works on-device for Directions API too.
+  static const String _androidMapsKey = 'AIzaSyDQ2c_pOSOFYSjxGMwkFvCVWKjYOM9siow';
+
   final String _webMapsKey = const String.fromEnvironment(
     'GOOGLE_MAPS_API_KEY',
     defaultValue: '',
@@ -222,24 +225,41 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
     if (_isFetchingRoute) return;
     _isFetchingRoute = true;
 
+    // Capture coords early so we can still fit bounds even if directions fail.
+    LatLng? origin;
+    LatLng? dest;
+
     try {
       final token = context.read<AuthProvider>().token;
       final delivery = context.read<DeliveryProvider>();
       final order = delivery.currentOrder;
       if (token == null || token.isEmpty || order == null) return;
 
-      final origin = _currentOrigin() ?? delivery.currentDeliveryBoyPosition ?? order.pickupLocation;
-      final dest = order.deliveryLocation;
+      origin = _currentOrigin() ?? delivery.currentDeliveryBoyPosition ?? order.pickupLocation;
+      dest = order.deliveryLocation;
 
       // Skip routing when coords are missing or clearly invalid (equator/prime meridian).
       if (!_isValidLatLng(origin)) return;
       if (dest.latitude.abs() < 0.001 || dest.longitude.abs() < 0.001) return;
 
-      final result = await ApiClient.getDirections(
-        token: token,
-        origin: origin,
-        destination: dest,
-      );
+      // Try calling Google Directions API directly from the device first.
+      // This avoids the backend API key restriction issues that cause
+      // "No route returned from Google Directions API" on Railway.
+      // If the direct call fails, fall back to the backend proxy.
+      DirectionsResult result;
+      try {
+        result = await ApiClient.getDirectionsDirect(
+          origin: origin,
+          destination: dest,
+          apiKey: _androidMapsKey,
+        );
+      } catch (_) {
+        result = await ApiClient.getDirections(
+          token: token,
+          origin: origin,
+          destination: dest,
+        );
+      }
 
       final points = decodePolyline(result.polyline);
       if (points.length < 2) return;
@@ -269,6 +289,13 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
       // Include endpoints to stabilize bounds even if the polyline starts/ends slightly off.
       _fitBoundsOrDefer([origin, ...sanitized, dest]);
     } catch (e) {
+      // Even when directions fail, zoom the camera out to show both the driver
+      // and the destination marker so the driver can still see where to go.
+      if (origin != null && dest != null &&
+          _isValidLatLng(origin) && _isValidLatLng(dest)) {
+        _fitBoundsOrDefer([origin, dest]);
+      }
+
       if (!_shownDirectionsError && mounted) {
         _shownDirectionsError = true;
         ScaffoldMessenger.of(context).showSnackBar(

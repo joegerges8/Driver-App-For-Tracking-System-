@@ -9,6 +9,8 @@ import 'package:delivery_boy_app/widgets/custom_button.dart';
 import 'package:delivery_boy_app/widgets/dash_vertical_line.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:delivery_boy_app/services/navigation_launcher.dart';
 
 class OrderDetailScreen extends StatelessWidget {
   const OrderDetailScreen({super.key});
@@ -62,9 +64,14 @@ class OrderDetailScreen extends StatelessWidget {
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     subtitle: Text("Delivery • ${order.customerPhone}"),
-                    trailing: CircleAvatar(
-                      backgroundColor: iconColor,
-                      child: Icon(Icons.phone, color: Colors.white),
+                    trailing: GestureDetector(
+                      onTap: () => launchUrl(
+                        Uri(scheme: 'tel', path: order.customerPhone),
+                      ),
+                      child: CircleAvatar(
+                        backgroundColor: iconColor,
+                        child: Icon(Icons.phone, color: Colors.white),
+                      ),
                     ),
                   ),
                 ],
@@ -124,7 +131,7 @@ class OrderDetailScreen extends StatelessWidget {
                         Icon(Icons.credit_card_outlined),
                         SizedBox(width: 10),
                         Text(
-                          "₹${order.price}",
+                          "\$${order.price}",
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
@@ -204,28 +211,6 @@ class OrderDetailScreen extends StatelessWidget {
                             ],
                           ),
                         ),
-                        CircleAvatar(
-                          radius: 18,
-                          backgroundColor: iconColor,
-                          child: Icon(
-                            Icons.phone,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                        ),
-                        SizedBox(width: 20),
-                        CircleAvatar(
-                          radius: 18,
-                          backgroundColor: Colors.red.shade50,
-                          child: Transform.rotate(
-                            angle: -pi / 4,
-                            child: Icon(
-                              Icons.send,
-                              size: 18,
-                              color: buttonMainColor,
-                            ),
-                          ),
-                        ),
                       ],
                     ),
                     // step 2: delivery
@@ -265,15 +250,20 @@ class OrderDetailScreen extends StatelessWidget {
                             ],
                           ),
                         ),
-                        CircleAvatar(
-                          radius: 18,
-                          backgroundColor: Colors.red.shade50,
-                          child: Transform.rotate(
-                            angle: -pi / 4,
-                            child: Icon(
-                              Icons.send,
-                              size: 18,
-                              color: buttonMainColor,
+                        GestureDetector(
+                          onTap: () => NavigationLauncher.openGoogleMapsNavigation(
+                            destination: order.deliveryLocation,
+                          ),
+                          child: CircleAvatar(
+                            radius: 18,
+                            backgroundColor: Colors.red.shade50,
+                            child: Transform.rotate(
+                              angle: -pi / 4,
+                              child: Icon(
+                                Icons.send,
+                                size: 18,
+                                color: buttonMainColor,
+                              ),
                             ),
                           ),
                         ),

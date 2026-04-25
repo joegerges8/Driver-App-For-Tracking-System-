@@ -304,20 +304,38 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
     super.dispose();
   }
 
+  // Fixed to actually call the backend instead of faking a success.
+  // Previously this method had a TODO stub: it waited 800 ms, showed a success
+  // snackbar, and closed the sheet — without ever sending the new password to the
+  // server, so the password in the database was never changed and the driver would
+  // get "Invalid credentials" the next time they tried to log in with the new password.
+  //
+  // Now it calls AuthProvider.changePassword(), which POSTs to the backend endpoint
+  // POST /api/drivers/me/password. On success the sheet closes and a snackbar
+  // confirms the update. On failure (e.g. wrong current password) the error message
+  // returned by the backend is displayed in red inside the sheet instead of crashing.
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() {
       _loading = true;
       _error = null;
     });
-    // TODO: wire up when backend exposes POST /api/drivers/me/password
-    await Future.delayed(const Duration(milliseconds: 800));
-    if (!mounted) return;
-    setState(() => _loading = false);
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Password updated')),
-    );
+    try {
+      await context.read<AuthProvider>().changePassword(
+        currentPassword: _currentCtrl.text,
+        newPassword: _newCtrl.text,
+      );
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Password updated')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override

@@ -98,6 +98,22 @@ class DeliveryProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void dismissOrder(OrderModel order) {
+    _orders.removeWhere((o) => o.id == order.id);
+    if (_currentOrder?.id == order.id) {
+      _currentOrder = _orders.isNotEmpty ? _orders.first : null;
+      if (_currentOrder == null) {
+        _pickupLocation = null;
+        _pickupAddress = null;
+        _routePoints.clear();
+        _polylines.clear();
+        _markers.clear();
+        _currentDeliveryBoyPosition = null;
+      }
+    }
+    notifyListeners();
+  }
+
   void setCurrentOrder(OrderModel order) {
     _currentOrder = order;
     _status = DeliveryStatus.waitingForAcceptance;

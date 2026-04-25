@@ -96,6 +96,23 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  // Added to fix the change-password feature.
+  // Passes the stored JWT token to ApiClient.changePassword so the backend can
+  // identify which driver is making the request. Throws if the driver is not
+  // currently logged in (token is missing) or if the backend rejects the request
+  // (e.g. wrong current password) — the error bubbles up to the UI for display.
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    if (_token == null || _token!.isEmpty) throw ApiException('Not authenticated');
+    await ApiClient.changePassword(
+      token: _token!,
+      currentPassword: currentPassword,
+      newPassword: newPassword,
+    );
+  }
+
   // Fetches fresh driver data from GET /api/drivers/me and updates _driver.
   // Called by ProfileScreen on load and on pull-to-refresh.
   // Errors are swallowed intentionally — the profile still shows the stale data

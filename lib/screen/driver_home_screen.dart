@@ -3,7 +3,7 @@ import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/services/google_maps_loader.dart';
 import 'package:delivery_boy_app/utils/utils.dart';
-import 'package:delivery_boy_app/widgets/order_card.dart';
+import 'package:delivery_boy_app/widgets/swipeable_order_cards.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
@@ -115,30 +115,43 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
               return Stack(
                 children: [
-                  // Map is always in the tree so it initializes immediately.
-                  if (mapsOk)
-                    GoogleMap(
-                      onMapCreated: _onMapCreated,
-                      markers: _buildMarkers(locationProvider.currentLocation),
-                      initialCameraPosition: CameraPosition(
-                        target: locationProvider.currentLocation,
-                        zoom: 15.0,
+                  Column(
+                    children: [
+                      // Spacer for the online indicator bar.
+                      SizedBox(height: size.height * 0.12),
+
+                      // Map fills the remaining space above the order widget.
+                      Expanded(
+                        child: mapsOk
+                            ? GoogleMap(
+                                onMapCreated: _onMapCreated,
+                                markers: _buildMarkers(
+                                    locationProvider.currentLocation),
+                                initialCameraPosition: CameraPosition(
+                                  target: locationProvider.currentLocation,
+                                  zoom: 15.0,
+                                ),
+                                myLocationEnabled: true,
+                                myLocationButtonEnabled: false,
+                                mapType: MapType.normal,
+                              )
+                            : Container(
+                                color: Colors.grey[200],
+                                alignment: Alignment.center,
+                                padding: const EdgeInsets.all(16),
+                                child: const Text(
+                                  'Google Maps is not configured for web.\n'
+                                  'Run with --dart-define=GOOGLE_MAPS_API_KEY=YOUR_KEY',
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
                       ),
-                      myLocationEnabled: true,
-                      myLocationButtonEnabled: false,
-                      mapType: MapType.normal,
-                    )
-                  else
-                    Container(
-                      color: Colors.grey[200],
-                      alignment: Alignment.center,
-                      padding: const EdgeInsets.all(16),
-                      child: const Text(
-                        'Google Maps is not configured for web.\n'
-                        'Run with --dart-define=GOOGLE_MAPS_API_KEY=YOUR_KEY',
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
+
+                      // Swipeable order cards embedded below the map.
+                      if (locationProvider.errorMessage.isEmpty)
+                        const SwipeableOrderCards(),
+                    ],
+                  ),
 
                   // Loading overlay — map stays alive underneath.
                   if (locationProvider.isLoading)
@@ -152,23 +165,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                             SizedBox(height: 15),
                             Text("Getting your location...."),
                           ],
-                        ),
-                      ),
-                    ),
-
-                  // Order card at the bottom.
-                  if (locationProvider.errorMessage.isEmpty)
-                    Align(
-                      alignment: Alignment.bottomCenter,
-                      child: Padding(
-                        padding: const EdgeInsets.all(15),
-                        child: Consumer<DeliveryProvider>(
-                          builder: (context, delivery, child) {
-                            if (delivery.currentOrder == null) {
-                              return const SizedBox.shrink();
-                            }
-                            return const OrderCard();
-                          },
                         ),
                       ),
                     ),
@@ -200,7 +196,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                       child: Container(
                                         decoration: BoxDecoration(
                                           color: Colors.red,
-                                          borderRadius: BorderRadius.circular(30),
+                                          borderRadius:
+                                              BorderRadius.circular(30),
                                         ),
                                         alignment: Alignment.center,
                                         child: const Text(
