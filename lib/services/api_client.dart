@@ -4,11 +4,26 @@ import 'package:delivery_boy_app/services/api_config.dart';
 import 'package:http/http.dart' as http;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
-// Added in this change:
-// Minimal HTTP client for the Node backend driver auth endpoints.
-// - POST /api/drivers/signup
-// - POST /api/drivers/login
-// - GET  /api/drivers/me
+// ApiClient
+//
+// A static HTTP client that communicates with the Node.js backend.
+// Every method corresponds to one backend endpoint. The class uses the
+// http package to make network requests and throws an ApiException with a
+// human-readable message whenever a request fails, so callers (providers)
+// can display the error to the driver without crashing the app.
+//
+// Authentication: protected endpoints include an "Authorization: Bearer <token>"
+// header. The token is a JWT issued by the backend on login and stored in
+// AuthProvider.
+//
+// Endpoints covered:
+//   POST /api/drivers/signup
+//   POST /api/drivers/login
+//   POST /api/drivers/me/password
+//   GET  /api/drivers/me
+//   GET  /api/drivers/me/orders           — active assigned orders
+//   GET  /api/drivers/me/orders/completed — completed (delivered) orders
+//   GET  /api/maps/directions             — route between two coordinates
 class ApiClient {
   static Uri _uri(String path) => Uri.parse('${ApiConfig.baseUrl}$path');
 
@@ -135,6 +150,36 @@ class ApiClient {
 
     throw ApiException(
       _errorMessage(body) ?? 'Failed to fetch profile (HTTP ${res.statusCode})',
+    );
+  }
+
+  // Fetches the list of completed (DELIVERED) orders for the authenticated driver.
+  // Called lazily when the driver first opens the "Done" tab, so we avoid an
+  // unnecessary network request on every app start.
+  // Returns an empty list (not an error) if the driver has no completed orders yet.
+  static Future<List<dynamic>> getCompletedOrders({required String token}) async {
+    http.Response res;
+    try {
+      res = await http.get(
+        _uri('/api/drivers/me/orders/completed'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+    } catch (e) {
+      throw ApiException('Network error: $e');
+    }
+
+    final decoded = _decodeJsonAny(res);
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      if (decoded is List) return decoded;
+      return [];
+    }
+
+    final body = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+    throw ApiException(
+      _errorMessage(body) ?? 'Failed to fetch completed orders (HTTP ${res.statusCode})',
     );
   }
 
