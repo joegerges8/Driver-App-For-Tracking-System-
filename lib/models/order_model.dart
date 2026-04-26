@@ -19,6 +19,11 @@ class OrderModel {
   // that any new order is treated as unpaid until confirmed otherwise.
   final bool isPaid;
 
+  // When the order was marked delivered. Null for orders predating the
+  // delivered_at column migration. Used in the Shipment tab for grouping
+  // history by date and filtering earnings by period.
+  final DateTime? deliveredAt;
+
   OrderModel({
     required this.id,
     required this.customerName,
@@ -31,6 +36,7 @@ class OrderModel {
     required this.pickupAddress,
     required this.deliveryAddress,
     this.isPaid = false,
+    this.deliveredAt,
   });
 
   factory OrderModel.fromBackend(Map<String, dynamic> json) {
@@ -91,6 +97,9 @@ class OrderModel {
       // Any other value ('pending', '', null) means the cash has not yet
       // been collected, so we treat the order as unpaid.
       isPaid: financialStatus == 'paid',
+      deliveredAt: json['delivered_at'] != null
+          ? DateTime.tryParse(json['delivered_at'].toString())
+          : null,
     );
   }
 

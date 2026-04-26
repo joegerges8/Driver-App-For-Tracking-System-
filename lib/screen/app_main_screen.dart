@@ -1,6 +1,7 @@
 import 'package:delivery_boy_app/screen/driver_home_screen.dart';
 import 'package:delivery_boy_app/screen/orders_screen.dart';
 import 'package:delivery_boy_app/screen/profile_screen.dart';
+import 'package:delivery_boy_app/screen/shipment_screen.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
@@ -21,7 +22,7 @@ class _AppMainScreenState extends State<AppMainScreen> {
   final List<Widget> pages = [
      DriverHomeScreen(),
   OrdersScreen(),
-      Center(child: Text("Shipment")),
+      ShipmentScreen(),
       ProfileScreen(),
   ];
   // initially display the index of the pages list
