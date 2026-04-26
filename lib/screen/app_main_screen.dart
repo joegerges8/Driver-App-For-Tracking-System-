@@ -33,7 +33,7 @@ class _AppMainScreenState extends State<AppMainScreen> {
     FontAwesomeIcons.truckFast,
     FontAwesomeIcons.solidCircleUser,
   ];
-  final List<String> _labels = ["House", "Orders", "Shipment", "Profile"];
+  final List<String> _labels = ["Home", "Orders", "Shipment", "Profile"];
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -55,6 +55,7 @@ class _AppMainScreenState extends State<AppMainScreen> {
           children: List.generate(_icons.length, (index) {
             final bool isSelected = _currentIndex == index;
             return GestureDetector(
+              behavior: HitTestBehavior.opaque,
               onTap: () {
                 // Pages are kept alive in `pages`, so initState won't re-run.
                 // Refresh orders when entering Home/Orders tabs.
@@ -69,7 +70,9 @@ class _AppMainScreenState extends State<AppMainScreen> {
                   _currentIndex = index;
                 });
               },
-              child: Column(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
@@ -93,6 +96,7 @@ class _AppMainScreenState extends State<AppMainScreen> {
                     ),
                   ),
                 ],
+                ),
               ),
             );
           }),
