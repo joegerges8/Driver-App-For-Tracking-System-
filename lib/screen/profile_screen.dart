@@ -78,7 +78,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final email = (driver?['email'] ?? '') as String;
     final phone = (driver?['phone'] ?? '—') as String;
     final initials = fullName.trim().isNotEmpty ? fullName.trim()[0].toUpperCase() : 'D';
-    final totalOrders = delivery.orders.length;
+    final totalOrders = delivery.completedOrders.length;
 
     return Scaffold(
       backgroundColor: backgroundColor,

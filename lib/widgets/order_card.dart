@@ -15,6 +15,10 @@ class OrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final delivery = context.watch<DeliveryProvider>();
+    final isOngoing =
+        delivery.hasActiveDelivery && delivery.currentOrder?.id == order.id;
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -32,8 +36,11 @@ class OrderCard extends StatelessWidget {
           child: Row(
             children: [
               Text(
-                "New Order Available",
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                isOngoing ? "Ongoing Order" : "New Order Available",
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(width: 15),
               Text(
@@ -45,12 +52,13 @@ class OrderCard extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              GestureDetector(
-                onTap: () {
-                  context.read<DeliveryProvider>().dismissOrder(order);
-                },
-                child: const Icon(Icons.close),
-              ),
+              if (!isOngoing)
+                GestureDetector(
+                  onTap: () {
+                    context.read<DeliveryProvider>().dismissOrder(order);
+                  },
+                  child: const Icon(Icons.close),
+                ),
             ],
           ),
         ),
@@ -138,7 +146,9 @@ class OrderCard extends StatelessWidget {
               SizedBox(
                 width: double.maxFinite,
                 child: CustomButton(
-                  title: "View order details",
+                  title: isOngoing
+                      ? "View ongoing order"
+                      : "View order details",
                   onPressed: () {
                     context.read<DeliveryProvider>().setCurrentOrder(order);
                     NavigationHelper.push(context, const OrderDetailScreen());

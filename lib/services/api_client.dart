@@ -21,9 +21,10 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 //   POST /api/drivers/login
 //   POST /api/drivers/me/password
 //   GET  /api/drivers/me
-//   GET  /api/drivers/me/orders           — active assigned orders
-//   GET  /api/drivers/me/orders/completed — completed (delivered) orders
-//   GET  /api/maps/directions             — route between two coordinates
+//   GET  /api/drivers/me/orders                    — active assigned orders
+//   GET  /api/drivers/me/orders/completed          — completed (delivered) orders
+//   POST /api/drivers/me/orders/:id/location       — GPS ping for customer tracking
+//   GET  /api/maps/directions                      — route between two coordinates
 class ApiClient {
   static Uri _uri(String path) => Uri.parse('${ApiConfig.baseUrl}$path');
 
@@ -181,6 +182,29 @@ class ApiClient {
     throw ApiException(
       _errorMessage(body) ?? 'Failed to fetch completed orders (HTTP ${res.statusCode})',
     );
+  }
+
+  // Fire-and-forget GPS ping so the customer tracking page can show the
+  // driver's current position. Errors are swallowed — a missed ping just
+  // means the customer sees a slightly stale marker, which is acceptable.
+  static Future<void> postLocation({
+    required String token,
+    required String orderId,
+    required double latitude,
+    required double longitude,
+  }) async {
+    try {
+      await http.post(
+        _uri('/api/drivers/me/orders/$orderId/location'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'latitude': latitude, 'longitude': longitude}),
+      );
+    } catch (_) {
+      // Silent — never interrupt the driver's map experience over a ping failure.
+    }
   }
 
   static Future<void> updateOrderStatus({

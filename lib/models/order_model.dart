@@ -12,6 +12,13 @@ class OrderModel {
   final String pickupAddress;
   final String deliveryAddress;
 
+  // Tracks whether the customer has paid for this order.
+  // For COD (Cash on Delivery) orders, this starts as false when the order
+  // arrives from Shopify and becomes true only when the driver marks delivery
+  // complete (at which point cash has been collected). Defaults to false so
+  // that any new order is treated as unpaid until confirmed otherwise.
+  final bool isPaid;
+
   OrderModel({
     required this.id,
     required this.customerName,
@@ -23,6 +30,7 @@ class OrderModel {
     required this.deliveryLocation,
     required this.pickupAddress,
     required this.deliveryAddress,
+    this.isPaid = false,
   });
 
   factory OrderModel.fromBackend(Map<String, dynamic> json) {
@@ -60,6 +68,13 @@ class OrderModel {
 
     final totalPrice = _asDouble(json['total_price']);
 
+    // Read the financial_status field that comes from the backend database.
+    // Shopify sends this field on every order (e.g. 'pending', 'paid', 'voided').
+    // For COD orders Shopify sets it to 'pending' initially; our backend later
+    // updates it to 'paid' when the driver confirms delivery.
+    // We normalise to lowercase so comparisons are case-insensitive.
+    final financialStatus = (json['financial_status'] ?? '').toString().toLowerCase();
+
     return OrderModel(
       id: id == null ? '' : id.toString(),
       customerName: customerName.isNotEmpty ? customerName : 'Customer',
@@ -72,6 +87,10 @@ class OrderModel {
       pickupAddress: 'Current location',
       deliveryAddress:
           deliveryAddress.isNotEmpty ? deliveryAddress : 'Delivery address',
+      // isPaid is true only if the backend explicitly says 'paid'.
+      // Any other value ('pending', '', null) means the cash has not yet
+      // been collected, so we treat the order as unpaid.
+      isPaid: financialStatus == 'paid',
     );
   }
 

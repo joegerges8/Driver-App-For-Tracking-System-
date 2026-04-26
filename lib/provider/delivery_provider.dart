@@ -62,6 +62,11 @@ class DeliveryProvider extends ChangeNotifier {
   // directly — all changes must go through the provider's methods.
   DeliveryStatus get status => _status;
   OrderModel? get currentOrder => _currentOrder;
+  bool get hasActiveDelivery =>
+      _currentOrder != null &&
+      _status != DeliveryStatus.waitingForAcceptance &&
+      _status != DeliveryStatus.delivered &&
+      _status != DeliveryStatus.rejected;
   List<OrderModel> get orders => List.unmodifiable(_orders);
   bool get isLoadingOrders => _isLoadingOrders;
   String? get ordersError => _ordersError;
@@ -92,6 +97,30 @@ class DeliveryProvider extends ChangeNotifier {
       deliveryLocation: order.deliveryLocation,
       pickupAddress: pickupAddress,
       deliveryAddress: order.deliveryAddress,
+      isPaid: order.isPaid,
+    );
+  }
+
+  // Returns a copy of the given order with isPaid set to true.
+  // This is used when the driver completes a COD delivery — at that moment
+  // cash has been collected, so we flip the financial status to paid.
+  // Because OrderModel is immutable (every field is final), we cannot just
+  // write order.isPaid = true. Instead we must create a fresh instance that
+  // is identical in every way except isPaid, which is the standard immutable
+  // update pattern in Flutter/Dart.
+  OrderModel _withPaid(OrderModel order) {
+    return OrderModel(
+      id: order.id,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      item: order.item,
+      quantity: order.quantity,
+      price: order.price,
+      pickupLocation: order.pickupLocation,
+      deliveryLocation: order.deliveryLocation,
+      pickupAddress: order.pickupAddress,
+      deliveryAddress: order.deliveryAddress,
+      isPaid: true,
     );
   }
 
@@ -99,6 +128,13 @@ class DeliveryProvider extends ChangeNotifier {
   // from GET /api/drivers/me/orders. Sets loading state before the call
   // and clears it in the finally block regardless of success or failure.
   Future<void> refreshMyOrders({required String token}) async {
+    final activeOrderId = hasActiveDelivery ? _currentOrder?.id : null;
+    final activeStatus = _status;
+    final activeOrder = _currentOrder;
+    final activePickupLocation = _pickupLocation;
+    final activePickupAddress = _pickupAddress;
+    final activeDriverPosition = _currentDeliveryBoyPosition;
+
     _isLoadingOrders = true;
     _ordersError = null;
     notifyListeners(); // Triggers skeleton loading UI.
@@ -117,17 +153,57 @@ class DeliveryProvider extends ChangeNotifier {
       // order to reappear in the list from the backend response.
       final completedIds = _completedOrders.map((o) => o.id).toSet();
       _orders = parsed.where((o) => !completedIds.contains(o.id)).toList();
-      _currentOrder = _orders.isNotEmpty ? _orders.first : null;
-      _status = DeliveryStatus.waitingForAcceptance;
-      _pickupLocation = null;
-      _pickupAddress = null;
+
+      // Do not reset an accepted/in-progress delivery just because Home/Orders
+      // refreshed. Keep the driver's local progress until the order is delivered
+      // or rejected.
+      if (activeOrderId != null) {
+        final refreshedIndex = _orders.indexWhere((o) => o.id == activeOrderId);
+        if (refreshedIndex >= 0) {
+          final refreshed = _orders[refreshedIndex];
+          final pickupLocation =
+              activePickupLocation ??
+              activeOrder?.pickupLocation ??
+              refreshed.pickupLocation;
+          final pickupAddress =
+              activePickupAddress ??
+              activeOrder?.pickupAddress ??
+              refreshed.pickupAddress;
+          final preserved = _withPickup(
+            refreshed,
+            pickupLocation: pickupLocation,
+            pickupAddress: pickupAddress,
+          );
+          _orders[refreshedIndex] = preserved;
+          _currentOrder = preserved;
+        } else {
+          _currentOrder = activeOrder;
+        }
+        _status = activeStatus;
+        _pickupLocation = activePickupLocation;
+        _pickupAddress = activePickupAddress;
+        _currentDeliveryBoyPosition = activeDriverPosition;
+      } else {
+        _currentOrder = _orders.isNotEmpty ? _orders.first : null;
+        _status = DeliveryStatus.waitingForAcceptance;
+        _pickupLocation = null;
+        _pickupAddress = null;
+      }
     } catch (e) {
       _ordersError = e.toString();
-      _orders = [];
-      _currentOrder = null;
-      _status = DeliveryStatus.waitingForAcceptance;
-      _pickupLocation = null;
-      _pickupAddress = null;
+      if (activeOrderId != null) {
+        _currentOrder = activeOrder;
+        _status = activeStatus;
+        _pickupLocation = activePickupLocation;
+        _pickupAddress = activePickupAddress;
+        _currentDeliveryBoyPosition = activeDriverPosition;
+      } else {
+        _orders = [];
+        _currentOrder = null;
+        _status = DeliveryStatus.waitingForAcceptance;
+        _pickupLocation = null;
+        _pickupAddress = null;
+      }
     } finally {
       _isLoadingOrders = false;
       notifyListeners(); // Triggers rebuild with real data or error message.
@@ -199,9 +275,14 @@ class DeliveryProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Sets the selected order and resets all delivery state so the driver
-  // starts fresh with each new order detail view.
+  // Sets the selected order. If the selected order is already in progress,
+  // keep its current step instead of restarting the delivery flow.
   void setCurrentOrder(OrderModel order) {
+    if (hasActiveDelivery && _currentOrder?.id == order.id) {
+      notifyListeners();
+      return;
+    }
+
     _currentOrder = order;
     _status = DeliveryStatus.waitingForAcceptance;
     _pickupLocation = null;
@@ -317,10 +398,26 @@ class DeliveryProvider extends ChangeNotifier {
   // so the Completed tab and earnings strip update immediately without a refetch.
   void completeDeliveery() {
     if (_currentOrder != null) {
+      // Create a paid copy of the order before moving it to the completed list.
+      // This is the "optimistic UI update" pattern: we assume the backend PATCH
+      // will succeed and update the local state immediately so the driver sees
+      // "Paid" the instant they tap "Mark as Delivered", without having to wait
+      // for the network round-trip to finish. If the API call later fails, the
+      // caller (delivery_map_screen) shows an error snackbar.
+      final paidOrder = _withPaid(_currentOrder!);
+
+      // Remove the order from the active/pending list now that it is done.
       _orders.removeWhere((o) => o.id == _currentOrder!.id);
+
+      // Add the paid copy to the front of the completed list so it appears
+      // immediately at the top of the "Done" tab without a refetch.
       if (!_completedOrders.any((o) => o.id == _currentOrder!.id)) {
-        _completedOrders = [_currentOrder!, ..._completedOrders];
+        _completedOrders = [paidOrder, ..._completedOrders];
       }
+
+      // Also update _currentOrder so any screen still watching it (e.g. the
+      // order detail screen) reflects the paid status straight away.
+      _currentOrder = paidOrder;
     }
     _status = DeliveryStatus.delivered;
     notifyListeners();

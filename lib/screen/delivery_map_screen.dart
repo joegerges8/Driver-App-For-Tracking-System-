@@ -44,6 +44,9 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
   LatLng? _lastOriginForRoute;
   DateTime? _lastRouteFetchAt;
 
+  // Throttle backend location pings to once every 15 seconds.
+  DateTime? _lastLocationPost;
+
   // The same key used by Maps SDK for Android — works on-device for Directions API too.
   static const String _androidMapsKey = 'AIzaSyDQ2c_pOSOFYSjxGMwkFvCVWKjYOM9siow';
 
@@ -189,6 +192,24 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
 
           final delivery = context.read<DeliveryProvider>();
           delivery.updateDriverPosition(origin);
+
+          // Post GPS ping to backend every 15 s so the customer tracking page
+          // can show the driver's live position.
+          final now = DateTime.now();
+          final lastPost = _lastLocationPost;
+          if (lastPost == null || now.difference(lastPost).inSeconds >= 15) {
+            _lastLocationPost = now;
+            final token = context.read<AuthProvider>().token;
+            final orderId = delivery.currentOrder?.id;
+            if (token != null && orderId != null) {
+              ApiClient.postLocation(
+                token: token,
+                orderId: orderId,
+                latitude: pos.latitude,
+                longitude: pos.longitude,
+              );
+            }
+          }
 
           if (!_shouldFetchRouteForOrigin(origin)) return;
 

@@ -10,6 +10,7 @@ import 'package:delivery_boy_app/widgets/dash_vertical_line.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:delivery_boy_app/services/navigation_launcher.dart';
 
 class OrderDetailScreen extends StatelessWidget {
@@ -64,14 +65,32 @@ class OrderDetailScreen extends StatelessWidget {
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     subtitle: Text("Delivery • ${order.customerPhone}"),
-                    trailing: GestureDetector(
-                      onTap: () => launchUrl(
-                        Uri(scheme: 'tel', path: order.customerPhone),
-                      ),
-                      child: CircleAvatar(
-                        backgroundColor: iconColor,
-                        child: Icon(Icons.phone, color: Colors.white),
-                      ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        GestureDetector(
+                          onTap: () => launchUrl(
+                            Uri(scheme: 'tel', path: order.customerPhone),
+                          ),
+                          child: CircleAvatar(
+                            backgroundColor: iconColor,
+                            child: Icon(Icons.phone, color: Colors.white),
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () => launchUrl(
+                            Uri.parse(
+                              'https://wa.me/${order.customerPhone.replaceAll(RegExp(r'[^0-9]'), '')}',
+                            ),
+                            mode: LaunchMode.externalApplication,
+                          ),
+                          child: CircleAvatar(
+                            backgroundColor: const Color(0xFF25D366),
+                            child: FaIcon(FontAwesomeIcons.whatsapp, color: Colors.white, size: 20),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -138,13 +157,27 @@ class OrderDetailScreen extends StatelessWidget {
                           ),
                         ),
                         SizedBox(width: 10),
-                        Icon(Icons.check_circle_sharp, color: iconColor),
+                        // Dynamic payment status badge.
+                        // Previously this was hardcoded to always show "Paid",
+                        // which was misleading for COD orders where the customer
+                        // has not yet handed over cash.
+                        //
+                        // Now we read order.isPaid (a bool on OrderModel) and:
+                        //   - If false → orange empty circle + "Unpaid (COD)"
+                        //     This is the default for every new incoming order.
+                        //   - If true  → green checkmark + "Paid"
+                        //     This is set automatically when the driver taps
+                        //     "Mark as Delivered" (cash has been collected).
+                        Icon(
+                          order.isPaid ? Icons.check_circle_sharp : Icons.radio_button_unchecked,
+                          color: order.isPaid ? iconColor : Colors.orange,
+                        ),
                         SizedBox(width: 10),
                         Text(
-                          "Paid",
+                          order.isPaid ? "Paid" : "Unpaid (COD)",
                           style: TextStyle(
                             fontSize: 16,
-                            color: iconColor,
+                            color: order.isPaid ? iconColor : Colors.orange,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -278,6 +311,26 @@ class OrderDetailScreen extends StatelessWidget {
       ),
       bottomNavigationBar: Consumer<DeliveryProvider>(
         builder: (context, provider, child) {
+          if (provider.status == DeliveryStatus.pickingUp ||
+              provider.status == DeliveryStatus.destinationReached ||
+              provider.status == DeliveryStatus.markingAsDelivered) {
+            return Container(
+              color: Colors.white,
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 30),
+                child: CustomButton(
+                  title: "Continue Delivery",
+                  onPressed: () {
+                    NavigationHelper.pushReplacement(
+                      context,
+                      DeliveryMapScreen(),
+                    );
+                  },
+                ),
+              ),
+            );
+          }
+
           return Container(
             color: Colors.white,
             child: Padding(
