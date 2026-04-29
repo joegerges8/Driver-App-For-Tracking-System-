@@ -106,7 +106,7 @@ class _OrdersScreenState extends State<OrdersScreen>
     final delivery = context.watch<DeliveryProvider>();
 
     // Determine whether there is currently an order being actively delivered.
-    // An "active" delivery is one that has been accepted but not yet finished.
+    // Used only for the earnings strip "In Progress" pill.
     final isActive = delivery.currentOrder != null &&
         delivery.status != DeliveryStatus.waitingForAcceptance &&
         delivery.status != DeliveryStatus.delivered &&
@@ -116,9 +116,6 @@ class _OrdersScreenState extends State<OrdersScreen>
     final pendingOrders = delivery.orders
         .where((o) => !(isActive && o.id == delivery.currentOrder!.id))
         .toList();
-
-    // Active tab: at most one order — the one currently being delivered.
-    final activeOrders = isActive ? [delivery.currentOrder!] : <OrderModel>[];
 
     return Scaffold(
       backgroundColor: backgroundColor,
@@ -130,10 +127,6 @@ class _OrdersScreenState extends State<OrdersScreen>
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
         elevation: 0,
-        // TabBar is placed inside the AppBar's bottom slot so it sits
-        // directly below the title, which is standard Material design.
-        // isScrollable: true allows each tab to use its natural text width,
-        // preventing labels from being clipped when there are four tabs.
         bottom: TabBar(
           controller: _tabController,
           labelColor: buttonMainColor,
@@ -145,13 +138,11 @@ class _OrdersScreenState extends State<OrdersScreen>
           tabs: [
             Tab(text: 'All (${delivery.orders.length})'),
             Tab(text: 'Pending (${pendingOrders.length})'),
-            Tab(text: 'Active (${activeOrders.length})'),
+            Tab(text: 'Returned (${delivery.returnedOrders.length})'),
             Tab(text: 'Completed (${delivery.completedOrders.length})'),
           ],
         ),
       ),
-      // RefreshIndicator wraps the body so the driver can pull down to
-      // manually re-fetch orders at any time.
       body: RefreshIndicator(
         onRefresh: () async {
           final token = context.read<AuthProvider>().token;
@@ -161,7 +152,7 @@ class _OrdersScreenState extends State<OrdersScreen>
                 .refreshMyOrders(token: token);
           }
         },
-        child: _buildBody(delivery, pendingOrders, activeOrders, isActive),
+        child: _buildBody(delivery, pendingOrders, isActive),
       ),
     );
   }
@@ -170,7 +161,6 @@ class _OrdersScreenState extends State<OrdersScreen>
   Widget _buildBody(
     DeliveryProvider delivery,
     List<OrderModel> pendingOrders,
-    List<OrderModel> activeOrders,
     bool isActive,
   ) {
     // Show skeleton cards while the initial fetch is in progress.
@@ -199,15 +189,11 @@ class _OrdersScreenState extends State<OrdersScreen>
     // Main layout: earnings strip on top, then the four tab views below.
     return Column(
       children: [
-        // Earnings strip reads from completedOrders so the figures only
-        // reflect deliveries that have actually been completed.
         _EarningsSummaryStrip(
           completedOrders: delivery.completedOrders,
           isActive: isActive,
         ),
         Expanded(
-          // TabBarView renders the content for whichever tab is selected.
-          // It is linked to _tabController so swiping and tapping stay in sync.
           child: TabBarView(
             controller: _tabController,
             children: [
@@ -216,16 +202,12 @@ class _OrdersScreenState extends State<OrdersScreen>
                 orders: delivery.orders,
                 emptyMessage: 'No orders assigned yet',
               ),
-              // Pending tab — orders not yet accepted.
+              // Pending tab — orders not yet accepted, with city filter.
+              _PendingTabContent(orders: pendingOrders),
+              // Returned tab — orders the driver dismissed.
               _OrderList(
-                orders: pendingOrders,
-                emptyMessage: 'No pending orders',
-              ),
-              // Active tab — the single order currently being delivered.
-              _OrderList(
-                orders: activeOrders,
-                emptyMessage: 'No active delivery right now',
-                isActiveTab: true,
+                orders: delivery.returnedOrders,
+                emptyMessage: 'No returned orders',
               ),
               // Done tab — read-only cards for completed deliveries.
               _CompletedOrderList(delivery: delivery),
@@ -337,27 +319,148 @@ class _StatColumn extends StatelessWidget {
   }
 }
 
-// ──────────────────────── Order List (All / Pending / Active tabs) ─────────
+// ──────────────────────── Pending Tab (with city filter) ──────────────────
 //
-// A scrollable list of pending/active orders. Each item is wrapped in a
-// Dismissible widget so the driver can swipe left to remove an order.
+// Wraps _OrderList with a horizontal row of city filter chips at the top.
+// Manages its own _selectedCity state so the filter is isolated from the
+// parent screen.
+
+class _PendingTabContent extends StatefulWidget {
+  final List<OrderModel> orders;
+
+  const _PendingTabContent({required this.orders});
+
+  @override
+  State<_PendingTabContent> createState() => _PendingTabContentState();
+}
+
+class _PendingTabContentState extends State<_PendingTabContent> {
+  String? _selectedCity; // null = "All"
+
+  @override
+  Widget build(BuildContext context) {
+    final cities = widget.orders
+        .map((o) => o.city)
+        .where((c) => c.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+
+    final filtered = _selectedCity == null
+        ? widget.orders
+        : widget.orders.where((o) => o.city == _selectedCity).toList();
+
+    return Column(
+      children: [
+        if (cities.isNotEmpty)
+          _CityFilterBar(
+            cities: cities,
+            selectedCity: _selectedCity,
+            onSelected: (city) => setState(() {
+              _selectedCity = _selectedCity == city ? null : city;
+            }),
+          ),
+        Expanded(
+          child: _OrderList(
+            orders: filtered,
+            emptyMessage: 'No pending orders',
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ──────────────────────── City Filter Bar ─────────────────────────────────
+//
+// A horizontally scrollable row of filter chips — one per unique city in the
+// pending orders list, plus an "All" chip that clears the filter.
+
+class _CityFilterBar extends StatelessWidget {
+  final List<String> cities;
+  final String? selectedCity;
+  final ValueChanged<String> onSelected;
+
+  const _CityFilterBar({
+    required this.cities,
+    required this.selectedCity,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            _chip(context, label: 'All', selected: selectedCity == null,
+                onTap: () => onSelected('')),
+            ...cities.map((city) => _chip(
+                  context,
+                  label: city,
+                  selected: selectedCity == city,
+                  onTap: () => onSelected(city),
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _chip(BuildContext context,
+      {required String label,
+      required bool selected,
+      required VoidCallback onTap}) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(
+            color: selected ? buttonMainColor : Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected ? buttonMainColor : Colors.grey.shade300,
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: selected ? Colors.white : Colors.black54,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ──────────────────────── Order List (All / Returned tabs) ────────────────
+//
+// A scrollable list of orders. Each item is wrapped in a Dismissible widget
+// so the driver can swipe left to remove an order.
 // Tapping an order opens the OrderDetailScreen where it can be accepted.
 
 class _OrderList extends StatelessWidget {
   final List<OrderModel> orders;
   final String emptyMessage;
-  final bool isActiveTab;
 
   const _OrderList({
     required this.orders,
     required this.emptyMessage,
-    this.isActiveTab = false,
   });
 
   @override
   Widget build(BuildContext context) {
     if (orders.isEmpty) {
-      return _EmptyState(message: emptyMessage, isActiveTab: isActiveTab);
+      return _EmptyState(message: emptyMessage);
     }
 
     return ListView.builder(
@@ -843,23 +946,18 @@ class _CompletedOrderCard extends StatelessWidget {
 
 class _EmptyState extends StatelessWidget {
   final String message;
-  final bool isActiveTab;
   final bool isCompletedTab;
 
   const _EmptyState({
     required this.message,
-    this.isActiveTab = false,
     this.isCompletedTab = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Choose an icon that makes sense for each tab context.
     final icon = isCompletedTab
         ? Icons.check_circle_outline
-        : isActiveTab
-            ? Icons.local_shipping_outlined
-            : Icons.inbox_outlined;
+        : Icons.inbox_outlined;
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -877,13 +975,10 @@ class _EmptyState extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        // Secondary hint line, also tailored per tab.
         Text(
           isCompletedTab
               ? 'Completed deliveries will appear here'
-              : isActiveTab
-                  ? 'Accept an order to start delivering'
-                  : 'Pull down to refresh',
+              : 'Pull down to refresh',
           textAlign: TextAlign.center,
           style: const TextStyle(color: Colors.black26, fontSize: 13),
         ),

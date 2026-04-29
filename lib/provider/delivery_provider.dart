@@ -48,6 +48,10 @@ class DeliveryProvider extends ChangeNotifier {
   bool _isLoadingCompleted = false;
   String? _completedError;
 
+  // ── Returned (dismissed) orders ───────────────────────────────────────────
+  // Orders the driver has swiped away. Kept in memory for the Returned tab.
+  List<OrderModel> _returnedOrders = [];
+
   // ── Map state ─────────────────────────────────────────────────────────────
   List<LatLng> _routePoints = [];
   LatLng? _currentDeliveryBoyPosition;
@@ -56,6 +60,7 @@ class DeliveryProvider extends ChangeNotifier {
 
   LatLng? _pickupLocation;
   String? _pickupAddress;
+
 
   // ── Public getters ────────────────────────────────────────────────────────
   // Exposing unmodifiable views prevents external code from mutating the lists
@@ -73,6 +78,7 @@ class DeliveryProvider extends ChangeNotifier {
   List<OrderModel> get completedOrders => List.unmodifiable(_completedOrders);
   bool get isLoadingCompleted => _isLoadingCompleted;
   String? get completedError => _completedError;
+  List<OrderModel> get returnedOrders => List.unmodifiable(_returnedOrders);
   List<LatLng> get routePoints => _routePoints;
   LatLng? get currentDeliveryBoyPosition => _currentDeliveryBoyPosition;
   Set<Polyline> get polylines => _polylines;
@@ -97,6 +103,7 @@ class DeliveryProvider extends ChangeNotifier {
       deliveryLocation: order.deliveryLocation,
       pickupAddress: pickupAddress,
       deliveryAddress: order.deliveryAddress,
+      city: order.city,
       isPaid: order.isPaid,
     );
   }
@@ -120,6 +127,7 @@ class DeliveryProvider extends ChangeNotifier {
       deliveryLocation: order.deliveryLocation,
       pickupAddress: order.pickupAddress,
       deliveryAddress: order.deliveryAddress,
+      city: order.city,
       isPaid: true,
     );
   }
@@ -259,7 +267,9 @@ class DeliveryProvider extends ChangeNotifier {
   // Removes a specific order from the pending list (swipe-to-dismiss on the
   // orders screen). If the dismissed order was the current one, the current
   // order is reset to the next available order (or null if the list is empty).
+  // The dismissed order is kept in _returnedOrders for the Returned tab.
   void dismissOrder(OrderModel order) {
+    _returnedOrders.insert(0, order);
     _orders.removeWhere((o) => o.id == order.id);
     if (_currentOrder?.id == order.id) {
       _currentOrder = _orders.isNotEmpty ? _orders.first : null;

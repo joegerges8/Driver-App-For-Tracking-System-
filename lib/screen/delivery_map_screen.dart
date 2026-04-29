@@ -5,12 +5,14 @@ import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/current_location_provider.dart';
 import 'package:delivery_boy_app/screen/app_main_screen.dart';
 import 'package:delivery_boy_app/services/api_client.dart';
+import 'package:delivery_boy_app/services/background_location_service.dart';
 import 'package:delivery_boy_app/services/google_maps_loader.dart';
 import 'package:delivery_boy_app/services/navigation_launcher.dart';
 import 'package:delivery_boy_app/services/polyline_decoder.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:delivery_boy_app/widgets/custom_button.dart';
 import 'package:delivery_boy_app/widgets/order_on_the_way.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -23,7 +25,8 @@ class DeliveryMapScreen extends StatefulWidget {
   State<DeliveryMapScreen> createState() => _DeliveryMapScreenState();
 }
 
-class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
+class _DeliveryMapScreenState extends State<DeliveryMapScreen>
+    with WidgetsBindingObserver {
   GoogleMapController? _mapController;
   bool _shownDirectionsError = false;
   bool _isFetchingRoute = false;
@@ -40,15 +43,14 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
   // Debounce route refresh when origin updates.
   Timer? _routeRefreshDebounce;
 
+  DateTime? _lastLocationPost;
+
   StreamSubscription<Position>? _positionSubscription;
   LatLng? _lastOriginForRoute;
   DateTime? _lastRouteFetchAt;
 
-  // Throttle backend location pings to once every 15 seconds.
-  DateTime? _lastLocationPost;
-
   // The same key used by Maps SDK for Android — works on-device for Directions API too.
-  static const String _androidMapsKey = 'AIzaSyDQ2c_pOSOFYSjxGMwkFvCVWKjYOM9siow';
+  static const String _androidMapsKey = 'AIzaSyAriVJnIv8YZpcpQOIUy-4f3Tb1i0RTfAg';
 
   final String _webMapsKey = const String.fromEnvironment(
     'GOOGLE_MAPS_API_KEY',
@@ -60,6 +62,7 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _mapsLoadedFuture = ensureGoogleMapsLoaded(apiKey: _webMapsKey);
     Future.microtask(_fetchDirections);
     Future.microtask(_startLiveLocationUpdates);
@@ -67,10 +70,23 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _routeRefreshDebounce?.cancel();
     _positionSubscription?.cancel();
     _mapController?.dispose();
     super.dispose();
+  }
+
+  // Re-fetch directions when the driver returns from external navigation
+  // (e.g. Google Maps turn-by-turn). This refreshes both the route and the
+  // camera bounds so the map shows their updated position.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _shownDirectionsError = false;
+      _lastRouteFetchAt = null; // reset throttle so fetch runs immediately
+      Future.microtask(_fetchDirections);
+    }
   }
 
   // Awaits a status-update Future and shows a snackbar when it fails.
@@ -87,6 +103,21 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
           backgroundColor: Colors.red,
         ),
       );
+    }
+  }
+
+  Future<void> _markPickedUpAndRefresh(DeliveryProvider provider) async {
+    final authToken = context.read<AuthProvider>().token ?? '';
+    await _syncStatus(provider.markPickedUp(token: authToken));
+    if (!mounted) return;
+
+    _shownDirectionsError = false;
+    _lastRouteFetchAt = null;
+    await _fetchDirections();
+
+    final dest = provider.currentOrder?.deliveryLocation;
+    if (dest != null && _isValidLatLng(dest)) {
+      unawaited(NavigationLauncher.openGoogleMapsNavigation(destination: dest));
     }
   }
 
@@ -178,10 +209,15 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
         return;
       }
 
-      const settings = LocationSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 10,
-      );
+      final LocationSettings settings = defaultTargetPlatform == TargetPlatform.android
+          ? AndroidSettings(
+              accuracy: LocationAccuracy.bestForNavigation,
+              distanceFilter: 10,
+            )
+          : const LocationSettings(
+              accuracy: LocationAccuracy.bestForNavigation,
+              distanceFilter: 10,
+            );
 
       _positionSubscription =
           Geolocator.getPositionStream(locationSettings: settings).listen(
@@ -193,21 +229,22 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
           final delivery = context.read<DeliveryProvider>();
           delivery.updateDriverPosition(origin);
 
-          // Post GPS ping to backend every 15 s so the customer tracking page
-          // can show the driver's live position.
-          final now = DateTime.now();
-          final lastPost = _lastLocationPost;
-          if (lastPost == null || now.difference(lastPost).inSeconds >= 15) {
-            _lastLocationPost = now;
-            final token = context.read<AuthProvider>().token;
-            final orderId = delivery.currentOrder?.id;
-            if (token != null && orderId != null) {
-              ApiClient.postLocation(
-                token: token,
-                orderId: orderId,
-                latitude: pos.latitude,
-                longitude: pos.longitude,
-              );
+          // Post GPS to backend so the customer tracking page can show the driver.
+          final orderId = delivery.currentOrder?.id;
+          if (delivery.hasActiveDelivery && orderId != null && orderId.isNotEmpty) {
+            final now = DateTime.now();
+            if (_lastLocationPost == null ||
+                now.difference(_lastLocationPost!).inSeconds >= 15) {
+              _lastLocationPost = now;
+              final token = context.read<AuthProvider>().token ?? '';
+              if (token.isNotEmpty) {
+                ApiClient.postLocation(
+                  token: token,
+                  orderId: orderId,
+                  latitude: pos.latitude,
+                  longitude: pos.longitude,
+                );
+              }
             }
           }
 
@@ -225,6 +262,14 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
           // Ignore streaming errors; the map still works with last known origin.
         },
       );
+
+      // Start the background service once so location keeps posting when the app is minimized.
+      if (!mounted) return;
+      final delivery = context.read<DeliveryProvider>();
+      final orderId = delivery.currentOrder?.id;
+      if (delivery.hasActiveDelivery && orderId != null && orderId.isNotEmpty) {
+        BackgroundLocationService.startTracking(orderId);
+      }
     } catch (_) {
       // Ignore; location stream is best-effort.
     }
@@ -453,14 +498,7 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
                             final authToken = context.read<AuthProvider>().token ?? '';
                             switch (provider.status) {
                               case DeliveryStatus.pickingUp:
-                                _syncStatus(provider.markPickedUp(token: authToken));
-                                // Open external turn-by-turn navigation to the customer's location.
-                                final dest = provider.currentOrder?.deliveryLocation;
-                                if (dest != null) {
-                                  NavigationLauncher.openGoogleMapsNavigation(
-                                    destination: dest,
-                                  );
-                                }
+                                unawaited(_markPickedUpAndRefresh(provider));
                                 break;
                               case DeliveryStatus.destinationReached:
                                 provider.markAdDelivered();
@@ -561,6 +599,8 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
           _fitBounds(_pendingBoundsPoints);
           _pendingBoundsPoints = [];
         }
+        _shownDirectionsError = false;
+        unawaited(_fetchDirections());
       },
       initialCameraPosition: CameraPosition(target: target, zoom: 14.0),
       padding: EdgeInsets.only(
@@ -681,6 +721,7 @@ class _DeliveryMapScreenState extends State<DeliveryMapScreen> {
                   child: CustomButton(
                     title: 'Go Home',
                     onPressed: () {
+                      BackgroundLocationService.stopTracking();
                       Navigator.of(context).pop();
                       provider.reseDelivery();
                       Navigator.pushAndRemoveUntil(

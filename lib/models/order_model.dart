@@ -19,6 +19,10 @@ class OrderModel {
   // that any new order is treated as unpaid until confirmed otherwise.
   final bool isPaid;
 
+  // The city extracted from the backend shipping address. Used in the
+  // Pending tab's city filter chips.
+  final String city;
+
   // When the order was marked delivered. Null for orders predating the
   // delivered_at column migration. Used in the Shipment tab for grouping
   // history by date and filtering earnings by period.
@@ -35,6 +39,7 @@ class OrderModel {
     required this.deliveryLocation,
     required this.pickupAddress,
     required this.deliveryAddress,
+    this.city = '',
     this.isPaid = false,
     this.deliveredAt,
   });
@@ -93,6 +98,7 @@ class OrderModel {
       pickupAddress: 'Current location',
       deliveryAddress:
           deliveryAddress.isNotEmpty ? deliveryAddress : 'Delivery address',
+      city: city,
       // isPaid is true only if the backend explicitly says 'paid'.
       // Any other value ('pending', '', null) means the cash has not yet
       // been collected, so we treat the order as unpaid.

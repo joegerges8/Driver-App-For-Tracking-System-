@@ -34,11 +34,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   void initState() {
     super.initState();
     _mapsLoadedFuture = ensureGoogleMapsLoaded(apiKey: _webMapsKey);
-    Future.microtask(() {
+    Future.microtask(() async {
       if (!mounted) return;
       final token = context.read<AuthProvider>().token;
       if (token != null && token.isNotEmpty) {
-        context.read<DeliveryProvider>().refreshMyOrders(token: token);
+        final delivery = context.read<DeliveryProvider>();
+        await delivery.refreshMyOrders(token: token);
       }
     });
   }
@@ -56,10 +57,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   }
 
   // Move the camera to the real GPS location once — avoids repeated animations.
+  // Skip when GPS failed so we don't pan to the San Francisco fallback.
   void _maybeCenterOnLocation() {
     if (_hasCenteredOnLocation || _mapController == null) return;
     final loc = context.read<CurrentLocationProvider>();
-    if (!loc.isLoading) {
+    if (!loc.isLoading && loc.errorMessage.isEmpty) {
       _hasCenteredOnLocation = true;
       _mapController!.animateCamera(
         CameraUpdate.newLatLngZoom(loc.currentLocation, 15),
@@ -148,8 +150,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                       ),
 
                       // Swipeable order cards embedded below the map.
-                      if (locationProvider.errorMessage.isEmpty)
-                        const SwipeableOrderCards(),
+                      const SwipeableOrderCards(),
                     ],
                   ),
 

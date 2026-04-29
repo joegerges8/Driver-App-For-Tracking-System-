@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
@@ -46,11 +48,25 @@ class CurrentLocationProvider extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      // get current position
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-      // success - update location nad clear loading/error states.
+      // get current position with a 10-second timeout so the loading
+      // overlay doesn't hang forever when GPS takes too long to fix.
+      Position? position;
+      try {
+        position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+          ),
+        ).timeout(const Duration(seconds: 10));
+      } on TimeoutException {
+        position = await Geolocator.getLastKnownPosition();
+      }
+      if (position == null) {
+        _errorMessage = 'Could not get location. Using default.';
+        _isLoading = false;
+        notifyListeners();
+        return;
+      }
+      // success - update location and clear loading/error states.
       _currentLocation = LatLng(position.latitude, position.longitude);
       _isLoading = false;
       _errorMessage = "";
