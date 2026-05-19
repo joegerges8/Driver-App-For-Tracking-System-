@@ -1,14 +1,6 @@
 class ApiConfig {
-  // Single place to configure the backend base URL.
-  //
-  // Recommended: override at build/run time:
-  // `flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:3000`
-  //
-  // Notes:
-  // - Android emulator: use http://10.0.2.2:3000
-  // - Physical Android phone: use your PC's LAN IP, e.g. http://192.168.1.50:3000
-  // - iOS simulator: use http://localhost:3000
 
+ // stores the base URL of the backend
     static const String _prodUrl =
       'https://shopify-live-order-tracking-production.up.railway.app';
 
