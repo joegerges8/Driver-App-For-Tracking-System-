@@ -2,7 +2,7 @@ class ApiConfig {
 
  // stores the base URL of the backend
     static const String _prodUrl =
-      'https://shopify-live-order-tracking-production.up.railway.app';
+      'https://dispatcher-dashboard.up.railway.app';
 
   static const String _override =
       String.fromEnvironment('API_BASE_URL', defaultValue: '');

@@ -10,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 // SharedPreferences keys — must match auth_provider.dart's _tokenKey
 const _tokenKey = 'driver_auth_token';
 const _orderIdKey = 'bg_active_order_id';
-const _baseUrl = 'https://shopify-live-order-tracking-production.up.railway.app';
+const _baseUrl = 'https://dispatcher-dashboard.up.railway.app';
 
 class BackgroundLocationService {
   static final _svc = FlutterBackgroundService();
