@@ -19,6 +19,16 @@ class OrderModel {
   // that any new order is treated as unpaid until confirmed otherwise.
   final bool isPaid;
 
+  // True when the customer had already paid online before the order went out
+  // for delivery. Unlike isPaid — which flips to true for every order the
+  // moment it is delivered — this reflects how the order arrived and never
+  // changes afterwards.
+  //
+  // It exists because the driver collects no cash for these orders, so
+  // counting their price as earnings would report the same money twice: once
+  // where the customer actually paid, and again in the driver's total.
+  final bool isPrepaid;
+
   // The city extracted from the backend shipping address.
   final String city;
 
@@ -49,8 +59,13 @@ class OrderModel {
     this.city = '',
     this.area = '',
     this.isPaid = false,
+    this.isPrepaid = false,
     this.deliveredAt,
   });
+
+  // What this order actually contributes to the driver's earnings: the cash
+  // collected on delivery, which is nothing for an order paid online.
+  int get earnedPrice => isPrepaid ? 0 : price;
 
   factory OrderModel.fromBackend(Map<String, dynamic> json) {
     final id = json['id'];
@@ -95,6 +110,19 @@ class OrderModel {
     // We normalise to lowercase so comparisons are case-insensitive.
     final financialStatus = (json['financial_status'] ?? '').toString().toLowerCase();
 
+    final deliveredAt = json['delivered_at'] != null
+        ? DateTime.tryParse(json['delivered_at'].toString())
+        : null;
+
+    // The backend stores how the order arrived in a dedicated 'prepaid' column,
+    // because financial_status is overwritten with 'paid' on delivery.
+    // Older backends don't send the column at all; there, an order that reads
+    // as paid while still undelivered is the same signal, and a delivered one
+    // is assumed COD since that is the normal case.
+    final bool isPrepaid = json.containsKey('prepaid')
+        ? json['prepaid'] == true || json['prepaid'].toString() == 'true'
+        : financialStatus == 'paid' && deliveredAt == null;
+
     return OrderModel(
       id: id == null ? '' : id.toString(),
       customerName: customerName.isNotEmpty ? customerName : 'Customer',
@@ -113,9 +141,8 @@ class OrderModel {
       // Any other value ('pending', '', null) means the cash has not yet
       // been collected, so we treat the order as unpaid.
       isPaid: financialStatus == 'paid',
-      deliveredAt: json['delivered_at'] != null
-          ? DateTime.tryParse(json['delivered_at'].toString())
-          : null,
+      isPrepaid: isPrepaid,
+      deliveredAt: deliveredAt,
     );
   }
 

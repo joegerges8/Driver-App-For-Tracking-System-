@@ -314,7 +314,9 @@ class _OrdersScreenState extends State<OrdersScreen>
 // ──────────────────────── Earnings Summary Strip ───────────────────────────
 //
 // A red banner pinned above the tab views that shows:
-//   - Total Earned: the sum of all completed orders' prices.
+//   - Total Earned: the cash collected across completed orders. Orders the
+//     customer paid online count as 0 — the driver never handled that money,
+//     so including it would count the same payment twice.
 //   - Completed:    how many orders have been marked as delivered.
 //   - "In Progress" pill: shown only when a delivery is currently active.
 //
@@ -333,8 +335,9 @@ class _EarningsSummaryStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Sum the price field across all completed orders.
-    final total = completedOrders.fold<int>(0, (sum, o) => sum + o.price);
+    // Sum what the driver actually collected. Orders the customer had already
+    // paid online contribute 0 — see OrderModel.earnedPrice.
+    final total = completedOrders.fold<int>(0, (sum, o) => sum + o.earnedPrice);
 
     return Container(
       width: double.infinity,
@@ -729,13 +732,31 @@ class _OrderListCard extends StatelessWidget {
                         ),
                       ),
                       const Spacer(),
-                      Text(
-                        '\$${order.price}',
-                        style: TextStyle(
-                          color: buttonMainColor,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
+                      // The order's own value, not an earning — the delivery
+                      // hasn't happened yet. Prepaid orders are flagged so the
+                      // driver knows there is no cash to collect on arrival.
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            '\$${order.price}',
+                            style: TextStyle(
+                              color: order.isPrepaid
+                                  ? Colors.black38
+                                  : buttonMainColor,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          if (order.isPrepaid)
+                            Text(
+                              context.l10n.prepaid,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.black38,
+                              ),
+                            ),
+                        ],
                       ),
                       const SizedBox(width: 8),
                       // Chevron hints that the card is tappable.
@@ -956,13 +977,28 @@ class _CompletedOrderCard extends StatelessWidget {
                   style: const TextStyle(fontSize: 13, color: Colors.black54),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  '\$${order.price}',
-                  style: TextStyle(
-                    color: buttonMainColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
+                // Mirrors the earnings strip: a prepaid order earned nothing,
+                // so it shows $0 with its own price kept as a caption.
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '\$${order.earnedPrice}',
+                      style: TextStyle(
+                        color: order.isPrepaid ? Colors.black38 : buttonMainColor,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if (order.isPrepaid)
+                      Text(
+                        '\$${order.price} ${context.l10n.prepaid.toLowerCase()}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.black38,
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),
