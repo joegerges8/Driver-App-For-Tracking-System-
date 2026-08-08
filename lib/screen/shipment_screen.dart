@@ -239,8 +239,11 @@ class _EarningsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Only cash-on-delivery money counts as earned: an order the customer
+    // paid online contributes 0, otherwise the same payment would show up
+    // both in the store's takings and in the driver's total.
     final total =
-        filteredOrders.fold<int>(0, (sum, o) => sum + o.price);
+        filteredOrders.fold<int>(0, (sum, o) => sum + o.earnedPrice);
     final count = filteredOrders.length;
 
     return Container(
@@ -517,13 +520,32 @@ class _HistoryCard extends StatelessWidget {
                       const TextStyle(fontSize: 13, color: Colors.black54),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  '\$${order.price}',
-                  style: TextStyle(
-                    color: buttonMainColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
+                // The amount shown is what the driver collected, matching the
+                // earnings card above: $0 for an order paid online, with the
+                // order's own price kept visible underneath so the card still
+                // says what the delivery was worth.
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '\$${order.earnedPrice}',
+                      style: TextStyle(
+                        color: order.isPrepaid
+                            ? Colors.black38
+                            : buttonMainColor,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if (order.isPrepaid)
+                      Text(
+                        '\$${order.price} ${context.l10n.prepaid.toLowerCase()}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.black38,
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),

@@ -139,6 +139,8 @@ class DeliveryProvider extends ChangeNotifier {
       city: order.city,
       area: order.area,
       isPaid: order.isPaid,
+      isPrepaid: order.isPrepaid,
+      deliveredAt: order.deliveredAt,
     );
   }
 
@@ -164,6 +166,11 @@ class DeliveryProvider extends ChangeNotifier {
       city: order.city,
       area: order.area,
       isPaid: true,
+      // isPrepaid describes how the order arrived, so collecting the cash on
+      // delivery must not change it — that is exactly the distinction the
+      // earnings totals rely on.
+      isPrepaid: order.isPrepaid,
+      deliveredAt: order.deliveredAt,
     );
   }
 

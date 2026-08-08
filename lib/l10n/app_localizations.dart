@@ -116,6 +116,10 @@ class AppLocalizations {
   String get orderSummary => _t('orderSummary');
   String get paid => _t('paid');
   String get unpaidCod => _t('unpaidCod');
+  // Shown on orders the customer had already paid online: no cash is
+  // collected for them, so they count as 0 in the earnings totals.
+  String get prepaid => _t('prepaid');
+  String get prepaidNoCash => _t('prepaidNoCash');
   String get pickupLocation => _t('pickupLocation');
   String get deliveryLocation => _t('deliveryLocation');
   String get you => _t('you');
@@ -242,6 +246,8 @@ class AppLocalizations {
     'orderSummary': 'Order Summary',
     'paid': 'Paid',
     'unpaidCod': 'Unpaid (COD)',
+    'prepaid': 'Prepaid',
+    'prepaidNoCash': 'Paid online — no cash collected',
     'pickupLocation': 'Pickup Location',
     'deliveryLocation': 'Delivery Location',
     'you': 'You',
@@ -355,6 +361,8 @@ class AppLocalizations {
     'orderSummary': 'ملخص الطلب',
     'paid': 'مدفوع',
     'unpaidCod': 'غير مدفوع (الدفع عند الاستلام)',
+    'prepaid': 'مدفوع مسبقاً',
+    'prepaidNoCash': 'تم الدفع عبر الإنترنت — لا يوجد مبلغ مُحصَّل',
     'pickupLocation': 'موقع الاستلام',
     'deliveryLocation': 'موقع التوصيل',
     'you': 'أنت',

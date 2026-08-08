@@ -167,17 +167,25 @@ class OrderDetailScreen extends StatelessWidget {
                         //   - If true  → green checkmark + "Paid"
                         //     This is set automatically when the driver taps
                         //     "Mark as Delivered" (cash has been collected).
+                        // A prepaid order (paid online before dispatch) is
+                        // shown as its own state rather than plain "Paid":
+                        // the driver must not ask for cash, and the amount is
+                        // excluded from the earnings totals for that reason.
                         Icon(
                           order.isPaid ? Icons.check_circle_sharp : Icons.radio_button_unchecked,
                           color: order.isPaid ? iconColor : Colors.orange,
                         ),
                         SizedBox(width: 10),
-                        Text(
-                          order.isPaid ? l10n.paid : l10n.unpaidCod,
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: order.isPaid ? iconColor : Colors.orange,
-                            fontWeight: FontWeight.w600,
+                        Expanded(
+                          child: Text(
+                            order.isPrepaid
+                                ? l10n.prepaidNoCash
+                                : (order.isPaid ? l10n.paid : l10n.unpaidCod),
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: order.isPaid ? iconColor : Colors.orange,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ],
