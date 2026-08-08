@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/widgets/order_card.dart';
 import 'package:flutter/material.dart';
@@ -31,6 +33,15 @@ class _SwipeableOrderCardsState extends State<SwipeableOrderCards> {
     });
   }
 
+  // Height of one order page. 330 is the English layout plus the headroom
+  // Arabic needs; it scales with the accessibility font setting and is capped
+  // at 55% of the screen so the map above never collapses on short devices.
+  double _cardHeight(BuildContext context) {
+    final textScale = MediaQuery.textScalerOf(context).scale(1);
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    return math.min(330 * textScale, screenHeight * 0.55);
+  }
+
   @override
   Widget build(BuildContext context) {
     final orders = context.watch<DeliveryProvider>().orders;
@@ -58,14 +69,25 @@ class _SwipeableOrderCardsState extends State<SwipeableOrderCards> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Swipeable order pages
+          // Swipeable order pages.
+          //
+          // PageView needs a bounded height, and the old fixed 310 was tuned
+          // against English text: Arabic glyphs sit on a taller line box, which
+          // pushed the card a few pixels past the edge and produced the striped
+          // overflow banner. Two changes make that impossible to hit again:
+          // the box now grows with the driver's system font scale (capped so
+          // the map keeps at least half the screen), and each card scrolls
+          // inside its own page as a last resort, so a long translation or a
+          // long address can never overflow the layout.
           SizedBox(
-            height: 310,
+            height: _cardHeight(context),
             child: PageView.builder(
               controller: _pageController,
               itemCount: orders.length,
               onPageChanged: (i) => setState(() => _currentPage = i),
-              itemBuilder: (context, index) => OrderCard(order: orders[index]),
+              itemBuilder: (context, index) => SingleChildScrollView(
+                child: OrderCard(order: orders[index]),
+              ),
             ),
           ),
           // Page indicator dots — only shown when there are multiple orders
