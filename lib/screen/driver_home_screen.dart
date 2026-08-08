@@ -17,7 +17,6 @@ class DriverHomeScreen extends StatefulWidget {
 
 class _DriverHomeScreenState extends State<DriverHomeScreen> {
   GoogleMapController? _mapController;
-  bool isOnline = true;
   // Cache the future so it doesn't reset on every rebuild.
   late final Future<bool> _mapsLoadedFuture;
   // Track whether we've already moved the camera to the real GPS location.
@@ -96,7 +95,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
             });
           }
 
-          if (locationProvider.errorMessage.isNotEmpty && !_locationErrorShown) {
+          if (locationProvider.errorMessage.isNotEmpty &&
+              !_locationErrorShown) {
             _locationErrorShown = true;
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!mounted) return;
@@ -108,8 +108,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
             });
           }
 
-          final Size size = MediaQuery.of(context).size;
-
           return FutureBuilder<bool>(
             future: _mapsLoadedFuture,
             builder: (context, snapshot) {
@@ -119,16 +117,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                 children: [
                   Column(
                     children: [
-                      // Spacer for the online indicator bar.
-                      SizedBox(height: size.height * 0.12),
-
                       // Map fills the remaining space above the order widget.
                       Expanded(
                         child: mapsOk
                             ? GoogleMap(
                                 onMapCreated: _onMapCreated,
                                 markers: _buildMarkers(
-                                    locationProvider.currentLocation),
+                                  locationProvider.currentLocation,
+                                ),
                                 initialCameraPosition: CameraPosition(
                                   target: locationProvider.currentLocation,
                                   zoom: 15.0,
@@ -169,58 +165,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         ),
                       ),
                     ),
-
-                  // Online indicator at the top.
-                  Align(
-                    alignment: Alignment.topCenter,
-                    child: Container(
-                      height: size.height * 0.12,
-                      color: Colors.white,
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Center(
-                          child: Align(
-                            alignment: Alignment.bottomCenter,
-                            child: Container(
-                              width: 200,
-                              height: 38,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(30),
-                                border: Border.all(color: Colors.red, width: 2),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.all(2.0),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      flex: 2,
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: Colors.red,
-                                          borderRadius:
-                                              BorderRadius.circular(30),
-                                        ),
-                                        alignment: Alignment.center,
-                                        child: const Text(
-                                          "Online",
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    Expanded(child: SizedBox()),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
                 ],
               );
             },
