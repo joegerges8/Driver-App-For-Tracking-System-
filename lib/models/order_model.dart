@@ -19,9 +19,16 @@ class OrderModel {
   // that any new order is treated as unpaid until confirmed otherwise.
   final bool isPaid;
 
-  // The city extracted from the backend shipping address. Used in the
-  // Pending tab's city filter chips.
+  // The city extracted from the backend shipping address.
   final String city;
+
+  // The delivery area (Lebanese caza) the backend derived from the city, e.g.
+  // 'Keserwan', 'Metn', 'Zahle'. Used for the filter chips on the orders page.
+  // Customers type city names freely, so grouping by city produced dozens of
+  // one-order chips ("Zahle Madine", "zahle", "Zahlé"); the backend collapses
+  // those onto one area. 'Other' when the city could not be placed, empty for
+  // orders written before the area column existed.
+  final String area;
 
   // When the order was marked delivered. Null for orders predating the
   // delivered_at column migration. Used in the Shipment tab for grouping
@@ -40,6 +47,7 @@ class OrderModel {
     required this.pickupAddress,
     required this.deliveryAddress,
     this.city = '',
+    this.area = '',
     this.isPaid = false,
     this.deliveredAt,
   });
@@ -55,6 +63,7 @@ class OrderModel {
 
     final shippingAddress = (json['shipping_address'] ?? '').toString().trim();
     final city = (json['city'] ?? '').toString().trim();
+    final area = (json['area'] ?? '').toString().trim();
     final country = (json['country'] ?? '').toString().trim();
     final deliveryAddress = [shippingAddress, city, country]
         .where((p) => p.isNotEmpty)
@@ -99,6 +108,7 @@ class OrderModel {
       deliveryAddress:
           deliveryAddress.isNotEmpty ? deliveryAddress : 'Delivery address',
       city: city,
+      area: area,
       // isPaid is true only if the backend explicitly says 'paid'.
       // Any other value ('pending', '', null) means the cash has not yet
       // been collected, so we treat the order as unpaid.
