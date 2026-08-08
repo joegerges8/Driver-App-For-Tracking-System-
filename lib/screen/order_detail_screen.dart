@@ -1,8 +1,7 @@
 import 'dart:math';
+import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/current_location_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
-import 'package:delivery_boy_app/route.dart';
-import 'package:delivery_boy_app/screen/delivery_map_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:delivery_boy_app/utils/utils.dart';
 import 'package:delivery_boy_app/widgets/custom_button.dart';
@@ -309,118 +308,130 @@ class OrderDetailScreen extends StatelessWidget {
           ],
         ),
       ),
-      bottomNavigationBar: Consumer<DeliveryProvider>(
-        builder: (context, provider, child) {
-          if (provider.status == DeliveryStatus.pickingUp ||
-              provider.status == DeliveryStatus.destinationReached ||
-              provider.status == DeliveryStatus.markingAsDelivered) {
-            return Container(
-              color: Colors.white,
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 30),
-                child: CustomButton(
-                  title: "Continue Delivery",
-                  onPressed: () {
-                    NavigationHelper.pushReplacement(
-                      context,
-                      DeliveryMapScreen(),
-                    );
-                  },
-                ),
-              ),
-            );
-          }
+      // The whole delivery flow lives in this one bar:
+      //   • Before starting  → a single "Start Delivery" button.
+      //   • After starting   → "Mark as Returned" / "Mark as Delivered".
+      // There is no accept/decline step, no pickup step and no in-app map:
+      // the dispatcher flips the order to PICKED_UP from the dashboard, which
+      // is what reveals the driver on the customer's tracking page. The GPS
+      // itself starts flowing as soon as "Start Delivery" is tapped.
+      bottomNavigationBar: order == null
+          ? null
+          : Consumer<DeliveryProvider>(
+              builder: (context, provider, child) {
+                final isDelivering =
+                    provider.status == DeliveryStatus.delivering;
 
-          return Container(
-            color: Colors.white,
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 30),
-              child: provider.status == DeliveryStatus.orderAccepted
-                  ? CustomButton(
-                      title: "Start Pickup",
-                      onPressed: () {
-                        // move delivery boy to pickup location and navigate to map
-                        final loc = context.read<CurrentLocationProvider>();
-                        if (loc.isLoading) {
-                          showAppSnackbar(
-                            context: context,
-                            type: SnackbarType.success,
-                            description:
-                                'Getting your current location… try again in a moment.',
-                          );
-                          return;
-                        }
-                        if (loc.errorMessage.isNotEmpty) {
-                          showAppSnackbar(
-                            context: context,
-                            type: SnackbarType.error,
-                            description: loc.errorMessage,
-                          );
-                          return;
-                        }
-
-                        final delivery = context.read<DeliveryProvider>();
-                        delivery.updateDriverPosition(loc.currentLocation);
-                        delivery.startPickup();
-                        NavigationHelper.pushReplacement(
-                          context,
-                          DeliveryMapScreen(),
-                        );
-                      },
-                    )
-                  : Row(
-                      children: [
-                        Expanded(
-                          child: CustomButton(
-                            color: declineOrder,
-                            textColor: Colors.black54,
-                            title: "Decline Order",
-                            onPressed: () {
-                              context.read<DeliveryProvider>().rejectOrder();
-                              Navigator.pop(context);
-                              showAppSnackbar(
-                                context: context,
-                                type: SnackbarType.error,
-                                description: "Order is not accepted",
-                              );
-                            },
+                return Container(
+                  color: Colors.white,
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 30),
+                    child: isDelivering
+                        ? Row(
+                            children: [
+                              Expanded(
+                                child: CustomButton(
+                                  color: declineOrder,
+                                  textColor: Colors.black54,
+                                  title: "Mark as Returned",
+                                  onPressed: () => _finishDelivery(
+                                    context,
+                                    returned: true,
+                                  ),
+                                ),
+                              ),
+                              SizedBox(width: 10),
+                              Expanded(
+                                child: CustomButton(
+                                  title: "Mark as Delivered",
+                                  onPressed: () => _finishDelivery(
+                                    context,
+                                    returned: false,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          )
+                        : CustomButton(
+                            title: "Start Delivery",
+                            onPressed: () => _startDelivery(context),
                           ),
-                        ),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: CustomButton(
-                            title: "Accept Order",
-                            onPressed: () {
-                              final loc = context.read<CurrentLocationProvider>();
-                              if (loc.isLoading) {
-                                showAppSnackbar(
-                                  context: context,
-                                  type: SnackbarType.success,
-                                  description: 'Getting your current location… try again in a moment.',
-                                );
-                                return;
-                              }
-                              if (loc.errorMessage.isNotEmpty) {
-                                showAppSnackbar(
-                                  context: context,
-                                  type: SnackbarType.error,
-                                  description: loc.errorMessage,
-                                );
-                                return;
-                              }
-
-                              context
-                                  .read<DeliveryProvider>()
-                                  .acceptOrder(pickupLocation: loc.currentLocation);
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
+                  ),
+                );
+              },
             ),
-          );
-        },
-      ),
     );
+  }
+
+  // Starts the delivery: stamps the driver's current position as the pickup
+  // point and kicks off background GPS sharing for this order. The screen
+  // stays where it is — only the buttons at the bottom change.
+  void _startDelivery(BuildContext context) {
+    final loc = context.read<CurrentLocationProvider>();
+    if (loc.isLoading) {
+      showAppSnackbar(
+        context: context,
+        type: SnackbarType.success,
+        description: 'Getting your current location… try again in a moment.',
+      );
+      return;
+    }
+    if (loc.errorMessage.isNotEmpty) {
+      showAppSnackbar(
+        context: context,
+        type: SnackbarType.error,
+        description: loc.errorMessage,
+      );
+      return;
+    }
+
+    context
+        .read<DeliveryProvider>()
+        .startDelivery(driverLocation: loc.currentLocation);
+
+    showAppSnackbar(
+      context: context,
+      type: SnackbarType.success,
+      description: 'Delivery started. Your location is now being shared.',
+    );
+  }
+
+  // Closes out the order as either delivered or returned, then goes back to
+  // the orders list. The provider updates local state straight away and syncs
+  // the status to the backend in the background; a failed sync surfaces as an
+  // error snackbar rather than blocking the driver.
+  Future<void> _finishDelivery(
+    BuildContext context, {
+    required bool returned,
+  }) async {
+    final provider = context.read<DeliveryProvider>();
+    final token = context.read<AuthProvider>().token ?? '';
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
+    final update = returned
+        ? provider.markReturned(token: token)
+        : provider.markDelivered(token: token);
+
+    showAppSnackbar(
+      context: context,
+      type: SnackbarType.success,
+      description: returned
+          ? 'Order marked as returned'
+          : 'Order marked as delivered',
+    );
+
+    if (navigator.canPop()) navigator.pop();
+
+    try {
+      await update;
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Status sync failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 }

@@ -74,7 +74,7 @@ class OrderModel {
     // 3. Last resort: sentinel (0,0) — the map screen skips routing for this.
     deliveryLocation ??= const LatLng(0.0, 0.0);
 
-    // Pickup is always the driver's live location (set when accepting).
+    // Pickup is always the driver's live location (set when the delivery starts).
     const pickupLocation = LatLng(0.0, 0.0);
 
     final totalPrice = _asDouble(json['total_price']);
