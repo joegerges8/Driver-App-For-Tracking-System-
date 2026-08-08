@@ -1,4 +1,42 @@
+import 'dart:convert';
+
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+
+// One product line of an order: what it is and how many of it the driver is
+// carrying. Comes from the backend's orders.line_items column, which the
+// webhook copies off the Shopify order.
+class OrderLineItem {
+  final String title;
+
+  // The variant, when it says something ('500ml', 'Large'). Null for products
+  // with a single variant — the backend strips Shopify's "Default Title".
+  final String? variantTitle;
+
+  final int quantity;
+
+  const OrderLineItem({
+    required this.title,
+    this.variantTitle,
+    this.quantity = 1,
+  });
+
+  // The product as one line: "Tender Coconut (500ml)".
+  String get displayName =>
+      variantTitle == null || variantTitle!.isEmpty
+          ? title
+          : '$title ($variantTitle)';
+
+  factory OrderLineItem.fromBackend(Map<String, dynamic> json) {
+    final quantity = int.tryParse('${json['quantity']}') ?? 1;
+    final variant = (json['variant_title'] ?? '').toString().trim();
+
+    return OrderLineItem(
+      title: (json['title'] ?? '').toString().trim(),
+      variantTitle: variant.isEmpty ? null : variant,
+      quantity: quantity > 0 ? quantity : 1,
+    );
+  }
+}
 
 class OrderModel {
   final String id;
@@ -7,6 +45,11 @@ class OrderModel {
   final String item;
   final int quantity;
   final int price;
+
+  // The products in this order. Empty for orders imported before the backend
+  // stored line items — the order detail screen falls back to showing just the
+  // order number in that case.
+  final List<OrderLineItem> lineItems;
   final LatLng pickupLocation;
   final LatLng deliveryLocation;
   final String pickupAddress;
@@ -56,6 +99,7 @@ class OrderModel {
     required this.deliveryLocation,
     required this.pickupAddress,
     required this.deliveryAddress,
+    this.lineItems = const [],
     this.city = '',
     this.area = '',
     this.isPaid = false,
@@ -129,6 +173,7 @@ class OrderModel {
       customerPhone: (json['customer_phone'] ?? '').toString(),
       item: orderNumber == null ? 'Order' : 'Order #$orderNumber',
       quantity: 1,
+      lineItems: _parseLineItems(json['line_items']),
       price: totalPrice == null ? 0 : totalPrice.round(),
       pickupLocation: pickupLocation,
       deliveryLocation: deliveryLocation,
@@ -144,6 +189,32 @@ class OrderModel {
       isPrepaid: isPrepaid,
       deliveredAt: deliveredAt,
     );
+  }
+
+  // Reads the backend's line_items column. Postgres JSONB normally arrives
+  // already decoded as a List, but a driver that hands it back as a JSON string
+  // is decoded here rather than dropping the products.
+  static List<OrderLineItem> _parseLineItems(dynamic value) {
+    dynamic raw = value;
+
+    if (raw is String) {
+      if (raw.trim().isEmpty) return const [];
+      try {
+        raw = jsonDecode(raw);
+      } catch (_) {
+        return const [];
+      }
+    }
+
+    if (raw is! List) return const [];
+
+    return raw
+        .whereType<Map>()
+        .map((item) => OrderLineItem.fromBackend(
+              item.map((key, value) => MapEntry(key.toString(), value)),
+            ))
+        .where((item) => item.title.isNotEmpty)
+        .toList();
   }
 
   // Returns a LatLng only when both values are present and geographically sane.

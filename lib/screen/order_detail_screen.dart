@@ -5,7 +5,6 @@ import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:delivery_boy_app/utils/utils.dart';
 import 'package:delivery_boy_app/widgets/custom_button.dart';
-import 'package:delivery_boy_app/widgets/dash_vertical_line.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -114,35 +113,60 @@ class OrderDetailScreen extends StatelessWidget {
                       ),
                     ),
                     SizedBox(height: 7),
-                    Row(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            tenderCoconut,
-                            height: 50,
-                            width: 50,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                        SizedBox(width: 5),
-                        Text.rich(
-                          TextSpan(
-                            style: TextStyle(
-                              fontWeight: FontWeight.w500,
-                              fontSize: 15,
-                            ),
+                    // The order number, then what is actually in the bag.
+                    // The products come from the backend's line_items column
+                    // (copied off the Shopify order); orders imported before
+                    // that column existed carry none, and then the order
+                    // number on its own is all there is to show.
+                    Text(
+                      order.item,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                      ),
+                    ),
+                    if (order.lineItems.isNotEmpty) ...[
+                      SizedBox(height: 10),
+                      ...order.lineItems.map(
+                        (lineItem) => Padding(
+                          padding: EdgeInsets.only(bottom: 6),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              TextSpan(text: "${order.item} "),
-                              TextSpan(
-                                text: " * ${order.quantity}",
-                                style: TextStyle(color: Colors.black38),
+                              // Quantity badge — the number the driver counts
+                              // against when handing the order over.
+                              Container(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: backgroundColor,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  '${lineItem.quantity}x',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  lineItem.displayName,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
                               ),
                             ],
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                     SizedBox(height: 10),
                     Row(
                       children: [
@@ -195,7 +219,11 @@ class OrderDetailScreen extends StatelessWidget {
               ),
             ),
             SizedBox(height: 12),
-            // Pickup and delivery locations
+            // Delivery location.
+            // The pickup step used to sit above this one, showing "Current
+            // location / You". It said nothing the driver did not already
+            // know — the pickup point is wherever they are when they tap
+            // "Start Delivery" — so only the destination is shown now.
             Material(
               color: Colors.white,
               borderRadius: BorderRadius.circular(20),
@@ -203,57 +231,6 @@ class OrderDetailScreen extends StatelessWidget {
                 padding: EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    // setp 1: Pickup.
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Column(
-                          children: [
-                            Icon(
-                              Icons.radio_button_checked,
-                              color: Colors.black54,
-                              size: 20,
-                            ),
-                            SizedBox(
-                              height: 80,
-                              child: DashVerticalLine(
-                                dashHeight: 5,
-                                dashGap: 5,
-                              ),
-                            ),
-                          ],
-                        ),
-                        SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                l10n.pickupLocation,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 16,
-                                ),
-                              ),
-                              SizedBox(height: 2),
-                              Text(
-                                order.pickupAddress,
-                                style: TextStyle(fontSize: 13),
-                              ),
-                              SizedBox(height: 2),
-                              Text(
-                                l10n.you,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    // step 2: delivery
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
