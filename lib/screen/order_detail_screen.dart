@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/current_location_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
@@ -10,7 +9,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:delivery_boy_app/services/navigation_launcher.dart';
 
 class OrderDetailScreen extends StatelessWidget {
   const OrderDetailScreen({super.key});
@@ -282,23 +280,9 @@ class OrderDetailScreen extends StatelessWidget {
                             ],
                           ),
                         ),
-                        GestureDetector(
-                          onTap: () => NavigationLauncher.openGoogleMapsNavigation(
-                            destination: order.deliveryLocation,
-                          ),
-                          child: CircleAvatar(
-                            radius: 18,
-                            backgroundColor: Colors.red.shade50,
-                            child: Transform.rotate(
-                              angle: -pi / 4,
-                              child: Icon(
-                                Icons.send,
-                                size: 18,
-                                color: buttonMainColor,
-                              ),
-                            ),
-                          ),
-                        ),
+                        // The "navigate here" button used to sit here. Orders
+                        // carry a written address but no customer coordinates,
+                        // so it had nothing to navigate to.
                       ],
                     ),
                   ],
