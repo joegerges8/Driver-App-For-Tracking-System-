@@ -16,6 +16,9 @@
 //  6. Empty states  — each tab shows a context-aware icon and message when empty.
 //  7. Done tab      — read-only green cards for completed deliveries, loaded
 //                     lazily when the driver first opens that tab.
+//  8. Area filter   — chips above the tabs narrow every tab to one delivery
+//                     area (Beirut, Metn, Keserwan, ...). Replaced an earlier
+//                     per-city filter; see _AreaFilterBar for why.
 
 import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
@@ -25,6 +28,10 @@ import 'package:delivery_boy_app/screen/order_detail_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
+// Label the backend uses for orders whose city string could not be matched to
+// an area. Kept in sync with UNKNOWN_AREA in the backend's areaLookup.js.
+const String _unknownArea = 'Other';
 
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
@@ -99,6 +106,54 @@ class _OrdersScreenState extends State<OrdersScreen>
     Future.microtask(_maybeFetch);
   }
 
+  // Currently selected delivery area, or null for "All". Lives on the screen
+  // rather than inside one tab so the same filter applies everywhere — picking
+  // Keserwan narrows All, Pending, Returned and Completed at once.
+  String? _selectedArea;
+
+  // The areas actually present in the driver's orders, sorted, with the
+  // catch-all bucket pushed to the end so it never crowds out real areas.
+  List<String> _areasIn(List<List<OrderModel>> orderLists) {
+    final areas = <String>{};
+    var hasUnfiled = false;
+
+    for (final list in orderLists) {
+      for (final order in list) {
+        // An empty area means the row predates the backend's area column, which
+        // is the same situation for a driver as one the lookup could not place.
+        if (order.area.isEmpty || order.area == _unknownArea) {
+          hasUnfiled = true;
+        } else {
+          areas.add(order.area);
+        }
+      }
+    }
+
+    final sorted = areas.toList()..sort();
+
+    // Only offer the catch-all chip alongside real areas. If nothing is
+    // classified yet — an app pointed at a backend that hasn't been backfilled —
+    // a lone "Other" chip filters nothing, so the bar stays hidden instead.
+    if (hasUnfiled && sorted.isNotEmpty) sorted.add(_unknownArea);
+    return sorted;
+  }
+
+  // Applies the selected area to a list. Orders with no area at all (written
+  // before the backend started classifying) count as unfiled, so they show up
+  // under the same chip as the ones the lookup could not place.
+  List<OrderModel> _filterByArea(List<OrderModel> orders) {
+    final selected = _selectedArea;
+    if (selected == null) return orders;
+
+    if (selected == _unknownArea) {
+      return orders
+          .where((o) => o.area.isEmpty || o.area == _unknownArea)
+          .toList();
+    }
+
+    return orders.where((o) => o.area == selected).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     // context.watch rebuilds this widget automatically whenever DeliveryProvider
@@ -133,10 +188,12 @@ class _OrdersScreenState extends State<OrdersScreen>
           isScrollable: true,
           tabAlignment: TabAlignment.start,
           tabs: [
-            Tab(text: 'All (${delivery.orders.length})'),
-            Tab(text: 'Pending (${pendingOrders.length})'),
-            Tab(text: 'Returned (${delivery.returnedOrders.length})'),
-            Tab(text: 'Completed (${delivery.completedOrders.length})'),
+            Tab(text: 'All (${_filterByArea(delivery.orders).length})'),
+            Tab(text: 'Pending (${_filterByArea(pendingOrders).length})'),
+            Tab(text:
+                'Returned (${_filterByArea(delivery.returnedOrders).length})'),
+            Tab(text:
+                'Completed (${_filterByArea(delivery.completedOrders).length})'),
           ],
         ),
       ),
@@ -183,31 +240,56 @@ class _OrdersScreenState extends State<OrdersScreen>
       );
     }
 
-    // Main layout: earnings strip on top, then the four tab views below.
+    // Every area present across all four lists, so switching tabs never makes
+    // the chip you selected disappear from the bar.
+    final areas = _areasIn([
+      delivery.orders,
+      pendingOrders,
+      delivery.returnedOrders,
+      delivery.completedOrders,
+    ]);
+
+    // Main layout: earnings strip, area filter, then the four tab views.
     return Column(
       children: [
         _EarningsSummaryStrip(
           completedOrders: delivery.completedOrders,
           isActive: isActive,
         ),
+        if (areas.isNotEmpty)
+          _AreaFilterBar(
+            areas: areas,
+            selectedArea: _selectedArea,
+            onSelected: (area) => setState(() {
+              // Tapping the active chip clears the filter, so "All" is always
+              // one tap away without hunting for it.
+              _selectedArea = (area.isEmpty || _selectedArea == area) ? null : area;
+            }),
+          ),
         Expanded(
           child: TabBarView(
             controller: _tabController,
             children: [
               // All tab — every assigned order.
               _OrderList(
-                orders: delivery.orders,
+                orders: _filterByArea(delivery.orders),
                 emptyMessage: 'No orders assigned yet',
               ),
-              // Pending tab — orders not yet accepted, with city filter.
-              _PendingTabContent(orders: pendingOrders),
-              // Returned tab — orders the driver dismissed.
+              // Pending tab — orders not started yet.
               _OrderList(
-                orders: delivery.returnedOrders,
+                orders: _filterByArea(pendingOrders),
+                emptyMessage: 'No pending orders',
+              ),
+              // Returned tab — orders the driver returned or dismissed.
+              _OrderList(
+                orders: _filterByArea(delivery.returnedOrders),
                 emptyMessage: 'No returned orders',
               ),
               // Done tab — read-only cards for completed deliveries.
-              _CompletedOrderList(delivery: delivery),
+              _CompletedOrderList(
+                orders: _filterByArea(delivery.completedOrders),
+                delivery: delivery,
+              ),
             ],
           ),
         ),
@@ -316,71 +398,25 @@ class _StatColumn extends StatelessWidget {
   }
 }
 
-// ──────────────────────── Pending Tab (with city filter) ──────────────────
+// ──────────────────────── Area Filter Bar ─────────────────────────────────
 //
-// Wraps _OrderList with a horizontal row of city filter chips at the top.
-// Manages its own _selectedCity state so the filter is isolated from the
-// parent screen.
-
-class _PendingTabContent extends StatefulWidget {
-  final List<OrderModel> orders;
-
-  const _PendingTabContent({required this.orders});
-
-  @override
-  State<_PendingTabContent> createState() => _PendingTabContentState();
-}
-
-class _PendingTabContentState extends State<_PendingTabContent> {
-  String? _selectedCity; // null = "All"
-
-  @override
-  Widget build(BuildContext context) {
-    final cities = widget.orders
-        .map((o) => o.city)
-        .where((c) => c.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
-
-    final filtered = _selectedCity == null
-        ? widget.orders
-        : widget.orders.where((o) => o.city == _selectedCity).toList();
-
-    return Column(
-      children: [
-        if (cities.isNotEmpty)
-          _CityFilterBar(
-            cities: cities,
-            selectedCity: _selectedCity,
-            onSelected: (city) => setState(() {
-              _selectedCity = _selectedCity == city ? null : city;
-            }),
-          ),
-        Expanded(
-          child: _OrderList(
-            orders: filtered,
-            emptyMessage: 'No pending orders',
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ──────────────────────── City Filter Bar ─────────────────────────────────
+// A horizontally scrollable row of filter chips — one per delivery area the
+// driver currently has orders in, plus an "All" chip that clears the filter.
 //
-// A horizontally scrollable row of filter chips — one per unique city in the
-// pending orders list, plus an "All" chip that clears the filter.
+// This replaced a per-city filter. Cities come from the Shopify checkout as
+// free text, so a single town produced several chips ("Zahle", "zahle",
+// "Zahle Madine") and a busy driver could face dozens of them. The backend now
+// maps each city onto a delivery area, which is both stable and the unit a
+// dispatcher actually thinks in.
 
-class _CityFilterBar extends StatelessWidget {
-  final List<String> cities;
-  final String? selectedCity;
+class _AreaFilterBar extends StatelessWidget {
+  final List<String> areas;
+  final String? selectedArea;
   final ValueChanged<String> onSelected;
 
-  const _CityFilterBar({
-    required this.cities,
-    required this.selectedCity,
+  const _AreaFilterBar({
+    required this.areas,
+    required this.selectedArea,
     required this.onSelected,
   });
 
@@ -393,13 +429,13 @@ class _CityFilterBar extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            _chip(context, label: 'All', selected: selectedCity == null,
+            _chip(context, label: 'All', selected: selectedArea == null,
                 onTap: () => onSelected('')),
-            ...cities.map((city) => _chip(
+            ...areas.map((area) => _chip(
                   context,
-                  label: city,
-                  selected: selectedCity == city,
-                  onTap: () => onSelected(city),
+                  label: area,
+                  selected: selectedArea == area,
+                  onTap: () => onSelected(area),
                 )),
           ],
         ),
@@ -770,9 +806,12 @@ class _StatusBadge extends StatelessWidget {
 // Completed orders are read-only (no swipe-to-dismiss).
 
 class _CompletedOrderList extends StatelessWidget {
+  // Already narrowed by the area filter; `delivery` is still needed for the
+  // loading and error states, which are not per-area.
+  final List<OrderModel> orders;
   final DeliveryProvider delivery;
 
-  const _CompletedOrderList({required this.delivery});
+  const _CompletedOrderList({required this.orders, required this.delivery});
 
   @override
   Widget build(BuildContext context) {
@@ -800,7 +839,7 @@ class _CompletedOrderList extends StatelessWidget {
     }
 
     // Show the empty state if there are no completed orders yet.
-    if (delivery.completedOrders.isEmpty) {
+    if (orders.isEmpty) {
       return const _EmptyState(
         message: 'No deliveries completed today',
         isCompletedTab: true,
@@ -811,9 +850,9 @@ class _CompletedOrderList extends StatelessWidget {
     return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-      itemCount: delivery.completedOrders.length,
+      itemCount: orders.length,
       itemBuilder: (context, index) {
-        final order = delivery.completedOrders[index];
+        final order = orders[index];
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: _CompletedOrderCard(order: order),

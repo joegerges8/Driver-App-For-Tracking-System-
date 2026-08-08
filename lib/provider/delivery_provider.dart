@@ -100,6 +100,7 @@ class DeliveryProvider extends ChangeNotifier {
       pickupAddress: pickupAddress,
       deliveryAddress: order.deliveryAddress,
       city: order.city,
+      area: order.area,
       isPaid: order.isPaid,
     );
   }
@@ -124,6 +125,7 @@ class DeliveryProvider extends ChangeNotifier {
       pickupAddress: order.pickupAddress,
       deliveryAddress: order.deliveryAddress,
       city: order.city,
+      area: order.area,
       isPaid: true,
     );
   }
