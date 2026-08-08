@@ -20,7 +20,7 @@ class _SwipeableOrderCardsState extends State<SwipeableOrderCards> {
     super.dispose();
   }
 
-  // Keep the page index in bounds after an order is dismissed.
+  // Keep the page index in bounds after an order leaves the list.
   void _clampPage(int orderCount) {
     if (orderCount == 0 || _currentPage < orderCount) return;
     final target = orderCount - 1;
@@ -65,8 +65,7 @@ class _SwipeableOrderCardsState extends State<SwipeableOrderCards> {
               controller: _pageController,
               itemCount: orders.length,
               onPageChanged: (i) => setState(() => _currentPage = i),
-              itemBuilder: (context, index) =>
-                  OrderCard(order: orders[index]),
+              itemBuilder: (context, index) => OrderCard(order: orders[index]),
             ),
           ),
           // Page indicator dots — only shown when there are multiple orders

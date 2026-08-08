@@ -33,15 +33,14 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 enum DeliveryStatus {
   notStarted, // Order opened, driver has not started the delivery yet.
   delivering, // Driver tapped "Start Delivery" — on the way to the customer.
-  delivered,  // Driver confirmed the delivery was completed.
-  returned,   // Driver could not deliver and returned the order.
+  delivered, // Driver confirmed the delivery was completed.
+  returned, // Driver could not deliver and returned the order.
 }
 
 class DeliveryProvider extends ChangeNotifier {
-
   // ── Delivery state ────────────────────────────────────────────────────────
   DeliveryStatus _status = DeliveryStatus.notStarted;
-  OrderModel? _currentOrder;   // The order currently selected or being delivered.
+  OrderModel? _currentOrder; // The order currently selected or being delivered.
 
   // ── Assigned (pending) orders ─────────────────────────────────────────────
   List<OrderModel> _orders = [];
@@ -56,14 +55,13 @@ class DeliveryProvider extends ChangeNotifier {
   String? _completedError;
 
   // ── Returned orders ───────────────────────────────────────────────────────
-  // Orders the driver swiped away or explicitly marked as returned.
+  // Orders the driver explicitly marked as returned.
   final List<OrderModel> _returnedOrders = [];
 
   // Where the driver was when they started the delivery. Shown as the pickup
   // point on the order detail screen.
   LatLng? _pickupLocation;
   String? _pickupAddress;
-
 
   // ── Public getters ────────────────────────────────────────────────────────
   // Exposing unmodifiable views prevents external code from mutating the lists
@@ -253,22 +251,6 @@ class DeliveryProvider extends ChangeNotifier {
     _currentOrder = null;
     _pickupLocation = null;
     _pickupAddress = null;
-    notifyListeners();
-  }
-
-  // Removes a specific order from the pending list (swipe-to-dismiss on the
-  // orders screen). If the dismissed order was the current one, the current
-  // order is reset to the next available order (or null if the list is empty).
-  // The dismissed order is kept in _returnedOrders for the Returned tab.
-  void dismissOrder(OrderModel order) {
-    _moveToReturned(order);
-    if (_currentOrder?.id == order.id) {
-      _currentOrder = _orders.isNotEmpty ? _orders.first : null;
-      if (_currentOrder == null) {
-        _pickupLocation = null;
-        _pickupAddress = null;
-      }
-    }
     notifyListeners();
   }
 

@@ -51,14 +51,6 @@ class OrderCard extends StatelessWidget {
                   color: buttonMainColor,
                 ),
               ),
-              const Spacer(),
-              if (!isOngoing)
-                GestureDetector(
-                  onTap: () {
-                    context.read<DeliveryProvider>().dismissOrder(order);
-                  },
-                  child: const Icon(Icons.close),
-                ),
             ],
           ),
         ),
@@ -138,7 +130,10 @@ class OrderCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 5),
                   _locationInfo(
-                      "Delivery - ", order.deliveryAddress, order.customerName),
+                    "Delivery - ",
+                    order.deliveryAddress,
+                    order.customerName,
+                  ),
                 ],
               ),
               const SizedBox(height: 15),
@@ -176,7 +171,9 @@ class OrderCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 15),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
                 ),
               ),
               Expanded(
@@ -186,7 +183,9 @@ class OrderCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      fontWeight: FontWeight.w500, fontSize: 15),
+                    fontWeight: FontWeight.w500,
+                    fontSize: 15,
+                  ),
                 ),
               ),
             ],

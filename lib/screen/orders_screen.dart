@@ -10,13 +10,12 @@
 //  3. Card layout   — each order is shown as an elevated card instead of a
 //                     plain ListTile, with pickup/delivery addresses and a
 //                     colour-coded status badge (orange = Pending, green = Active).
-//  4. Swipe-to-dismiss — the driver can swipe a pending order left to remove it.
-//  5. Skeleton loading — pulsing grey placeholder cards are shown while data
+//  4. Skeleton loading — pulsing grey placeholder cards are shown while data
 //                     loads, instead of a plain spinner.
-//  6. Empty states  — each tab shows a context-aware icon and message when empty.
-//  7. Done tab      — read-only green cards for completed deliveries, loaded
+//  5. Empty states  — each tab shows a context-aware icon and message when empty.
+//  6. Done tab      — read-only green cards for completed deliveries, loaded
 //                     lazily when the driver first opens that tab.
-//  8. Area filter   — chips above the tabs narrow every tab to one delivery
+//  7. Area filter   — chips above the tabs narrow every tab to one delivery
 //                     area (Beirut, Metn, Keserwan, ...). Replaced an earlier
 //                     per-city filter; see _AreaFilterBar for why.
 
@@ -190,10 +189,14 @@ class _OrdersScreenState extends State<OrdersScreen>
           tabs: [
             Tab(text: 'All (${_filterByArea(delivery.orders).length})'),
             Tab(text: 'Pending (${_filterByArea(pendingOrders).length})'),
-            Tab(text:
-                'Returned (${_filterByArea(delivery.returnedOrders).length})'),
-            Tab(text:
-                'Completed (${_filterByArea(delivery.completedOrders).length})'),
+            Tab(
+              text:
+                  'Returned (${_filterByArea(delivery.returnedOrders).length})',
+            ),
+            Tab(
+              text:
+                  'Completed (${_filterByArea(delivery.completedOrders).length})',
+            ),
           ],
         ),
       ),
@@ -201,9 +204,9 @@ class _OrdersScreenState extends State<OrdersScreen>
         onRefresh: () async {
           final token = context.read<AuthProvider>().token;
           if (token != null && token.isNotEmpty) {
-            await context
-                .read<DeliveryProvider>()
-                .refreshMyOrders(token: token);
+            await context.read<DeliveryProvider>().refreshMyOrders(
+              token: token,
+            );
           }
         },
         child: _buildBody(delivery, pendingOrders, isActive),
@@ -263,7 +266,9 @@ class _OrdersScreenState extends State<OrdersScreen>
             onSelected: (area) => setState(() {
               // Tapping the active chip clears the filter, so "All" is always
               // one tap away without hunting for it.
-              _selectedArea = (area.isEmpty || _selectedArea == area) ? null : area;
+              _selectedArea = (area.isEmpty || _selectedArea == area)
+                  ? null
+                  : area;
             }),
           ),
         Expanded(
@@ -280,7 +285,7 @@ class _OrdersScreenState extends State<OrdersScreen>
                 orders: _filterByArea(pendingOrders),
                 emptyMessage: 'No pending orders',
               ),
-              // Returned tab — orders the driver returned or dismissed.
+              // Returned tab — orders the driver marked as returned.
               _OrderList(
                 orders: _filterByArea(delivery.returnedOrders),
                 emptyMessage: 'No returned orders',
@@ -313,7 +318,10 @@ class _EarningsSummaryStrip extends StatelessWidget {
   final List<OrderModel> completedOrders;
   final bool isActive;
 
-  const _EarningsSummaryStrip({required this.completedOrders, required this.isActive});
+  const _EarningsSummaryStrip({
+    required this.completedOrders,
+    required this.isActive,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -343,8 +351,7 @@ class _EarningsSummaryStrip extends StatelessWidget {
           if (isActive) ...[
             const SizedBox(width: 16),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
                 color: Colors.white24,
                 borderRadius: BorderRadius.circular(20),
@@ -384,7 +391,10 @@ class _StatColumn extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white70, fontSize: 11),
+        ),
         Text(
           value,
           style: const TextStyle(
@@ -429,24 +439,32 @@ class _AreaFilterBar extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            _chip(context, label: 'All', selected: selectedArea == null,
-                onTap: () => onSelected('')),
-            ...areas.map((area) => _chip(
-                  context,
-                  label: area,
-                  selected: selectedArea == area,
-                  onTap: () => onSelected(area),
-                )),
+            _chip(
+              context,
+              label: 'All',
+              selected: selectedArea == null,
+              onTap: () => onSelected(''),
+            ),
+            ...areas.map(
+              (area) => _chip(
+                context,
+                label: area,
+                selected: selectedArea == area,
+                onTap: () => onSelected(area),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _chip(BuildContext context,
-      {required String label,
-      required bool selected,
-      required VoidCallback onTap}) {
+  Widget _chip(
+    BuildContext context, {
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: GestureDetector(
@@ -477,18 +495,14 @@ class _AreaFilterBar extends StatelessWidget {
 
 // ──────────────────────── Order List (All / Returned tabs) ────────────────
 //
-// A scrollable list of orders. Each item is wrapped in a Dismissible widget
-// so the driver can swipe left to remove an order.
+// A scrollable list of orders.
 // Tapping an order opens the OrderDetailScreen where the delivery is started.
 
 class _OrderList extends StatelessWidget {
   final List<OrderModel> orders;
   final String emptyMessage;
 
-  const _OrderList({
-    required this.orders,
-    required this.emptyMessage,
-  });
+  const _OrderList({required this.orders, required this.emptyMessage});
 
   @override
   Widget build(BuildContext context) {
@@ -515,64 +529,15 @@ class _OrderList extends StatelessWidget {
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          // Dismissible allows the driver to swipe the card left to dismiss it.
-          // A confirmation dialog is shown before the order is actually removed.
-          child: Dismissible(
-            key: Key(order.id), // Unique key required by Dismissible.
-            direction: DismissDirection.endToStart, // Swipe left only.
-            // Red background with a bin icon revealed during the swipe.
-            background: Container(
-              alignment: Alignment.centerRight,
-              padding: const EdgeInsets.only(right: 20),
-              decoration: BoxDecoration(
-                color: Colors.red.shade400,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Icon(
-                Icons.delete_outline,
-                color: Colors.white,
-                size: 28,
-              ),
-            ),
-            // Ask the driver to confirm before removing the order.
-            confirmDismiss: (_) async {
-              return await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Dismiss Order'),
-                      content:
-                          const Text('Remove this order from your list?'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('Cancel'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, true),
-                          child: const Text(
-                            'Dismiss',
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ) ??
-                  false;
+          child: _OrderListCard(
+            order: order,
+            isCurrentActive: isCurrentActive,
+            onTap: () {
+              // Set this order as the current one in the provider, then
+              // navigate to the detail screen where the delivery is started.
+              context.read<DeliveryProvider>().setCurrentOrder(order);
+              NavigationHelper.push(context, const OrderDetailScreen());
             },
-            // Calls dismissOrder on the provider, which removes the order from
-            // the in-memory list and triggers a UI rebuild via notifyListeners().
-            onDismissed: (_) =>
-                context.read<DeliveryProvider>().dismissOrder(order),
-            child: _OrderListCard(
-              order: order,
-              isCurrentActive: isCurrentActive,
-              onTap: () {
-                // Set this order as the current one in the provider, then
-                // navigate to the detail screen where the delivery is started.
-                context.read<DeliveryProvider>().setCurrentOrder(order);
-                NavigationHelper.push(context, const OrderDetailScreen());
-              },
-            ),
           ),
         );
       },
@@ -619,12 +584,12 @@ class _OrderListCard extends StatelessWidget {
           children: [
             // ── Card Header ──────────────────────────────────────────────
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: Colors.grey.shade50,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(16)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(16),
+                ),
               ),
               child: Row(
                 children: [
@@ -670,7 +635,10 @@ class _OrderListCard extends StatelessWidget {
                           ),
                           // The thin vertical line between the two location icons.
                           Container(
-                              width: 1, height: 18, color: Colors.black12),
+                            width: 1,
+                            height: 18,
+                            color: Colors.black12,
+                          ),
                         ],
                       ),
                       const SizedBox(width: 10),
@@ -681,7 +649,9 @@ class _OrderListCard extends StatelessWidget {
                             const Text(
                               'Pickup',
                               style: TextStyle(
-                                  color: Colors.black38, fontSize: 11),
+                                color: Colors.black38,
+                                fontSize: 11,
+                              ),
                             ),
                             Text(
                               order.pickupAddress,
@@ -702,11 +672,7 @@ class _OrderListCard extends StatelessWidget {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.location_on,
-                        color: buttonMainColor,
-                        size: 18,
-                      ),
+                      Icon(Icons.location_on, color: buttonMainColor, size: 18),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
@@ -715,7 +681,9 @@ class _OrderListCard extends StatelessWidget {
                             const Text(
                               'Delivery',
                               style: TextStyle(
-                                  color: Colors.black38, fontSize: 11),
+                                color: Colors.black38,
+                                fontSize: 11,
+                              ),
                             ),
                             Text(
                               order.deliveryAddress,
@@ -735,13 +703,18 @@ class _OrderListCard extends StatelessWidget {
                   // ── Footer: customer name + price + arrow ────────────
                   Row(
                     children: [
-                      const Icon(Icons.person_outline,
-                          size: 15, color: Colors.black45),
+                      const Icon(
+                        Icons.person_outline,
+                        size: 15,
+                        color: Colors.black45,
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         order.customerName,
                         style: const TextStyle(
-                            color: Colors.black54, fontSize: 13),
+                          color: Colors.black54,
+                          fontSize: 13,
+                        ),
                       ),
                       const Spacer(),
                       Text(
@@ -754,8 +727,11 @@ class _OrderListCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       // Chevron hints that the card is tappable.
-                      const Icon(Icons.chevron_right,
-                          color: Colors.black26, size: 20),
+                      const Icon(
+                        Icons.chevron_right,
+                        color: Colors.black26,
+                        size: 20,
+                      ),
                     ],
                   ),
                 ],
@@ -803,7 +779,7 @@ class _StatusBadge extends StatelessWidget {
 // Shows orders whose status is "DELIVERED" in the database. These are fetched
 // from a separate backend endpoint (GET /api/drivers/me/orders/completed) and
 // loaded lazily — only when the driver first opens the Done tab.
-// Completed orders are read-only (no swipe-to-dismiss).
+// Completed orders are read-only.
 
 class _CompletedOrderList extends StatelessWidget {
   // Already narrowed by the area filter; `delivery` is still needed for the
@@ -890,19 +866,25 @@ class _CompletedOrderCard extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: Colors.green.shade50,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(16)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(16),
+              ),
             ),
             child: Row(
               children: [
-                Icon(Icons.check_circle_outline,
-                    size: 18, color: Colors.green.shade600),
+                Icon(
+                  Icons.check_circle_outline,
+                  size: 18,
+                  color: Colors.green.shade600,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     order.item,
                     style: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 15),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -910,8 +892,10 @@ class _CompletedOrderCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 // "Delivered" badge in green.
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.green.shade100,
                     borderRadius: BorderRadius.circular(20),
@@ -934,26 +918,30 @@ class _CompletedOrderCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
             child: Row(
               children: [
-                const Icon(Icons.location_on_outlined,
-                    size: 15, color: Colors.black45),
+                const Icon(
+                  Icons.location_on_outlined,
+                  size: 15,
+                  color: Colors.black45,
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     order.deliveryAddress,
-                    style: const TextStyle(
-                        fontSize: 13, color: Colors.black54),
+                    style: const TextStyle(fontSize: 13, color: Colors.black54),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Icon(Icons.person_outline,
-                    size: 15, color: Colors.black45),
+                const Icon(
+                  Icons.person_outline,
+                  size: 15,
+                  color: Colors.black45,
+                ),
                 const SizedBox(width: 4),
                 Text(
                   order.customerName,
-                  style: const TextStyle(
-                      fontSize: 13, color: Colors.black54),
+                  style: const TextStyle(fontSize: 13, color: Colors.black54),
                 ),
                 const SizedBox(width: 12),
                 Text(
@@ -984,10 +972,7 @@ class _EmptyState extends StatelessWidget {
   final String message;
   final bool isCompletedTab;
 
-  const _EmptyState({
-    required this.message,
-    this.isCompletedTab = false,
-  });
+  const _EmptyState({required this.message, this.isCompletedTab = false});
 
   @override
   Widget build(BuildContext context) {
@@ -1070,14 +1055,16 @@ class _SkeletonCardState extends State<_SkeletonCard>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true); // Animate forward then backward, looping forever.
-    _opacity = Tween<double>(begin: 0.4, end: 0.85).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
+    _opacity = Tween<double>(
+      begin: 0.4,
+      end: 0.85,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
   }
 
   @override
   void dispose() {
-    _controller.dispose(); // Must dispose to stop the animation and free memory.
+    _controller
+        .dispose(); // Must dispose to stop the animation and free memory.
     super.dispose();
   }
 
@@ -1104,11 +1091,12 @@ class _SkeletonCardState extends State<_SkeletonCard>
               // Placeholder header area.
               Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 14),
+                  horizontal: 16,
+                  vertical: 14,
+                ),
                 decoration: const BoxDecoration(
                   color: Color(0xFFF5F5F5),
-                  borderRadius:
-                      BorderRadius.vertical(top: Radius.circular(16)),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
                 ),
                 child: Row(
                   children: [
@@ -1125,23 +1113,25 @@ class _SkeletonCardState extends State<_SkeletonCard>
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
                 child: Column(
                   children: [
-                    Row(children: [
-                      _box(18, 18, radius: 9),
-                      const SizedBox(width: 10),
-                      Expanded(child: _box(double.infinity, 14)),
-                    ]),
+                    Row(
+                      children: [
+                        _box(18, 18, radius: 9),
+                        const SizedBox(width: 10),
+                        Expanded(child: _box(double.infinity, 14)),
+                      ],
+                    ),
                     const SizedBox(height: 10),
-                    Row(children: [
-                      _box(18, 18, radius: 9),
-                      const SizedBox(width: 10),
-                      Expanded(child: _box(double.infinity, 14)),
-                    ]),
+                    Row(
+                      children: [
+                        _box(18, 18, radius: 9),
+                        const SizedBox(width: 10),
+                        Expanded(child: _box(double.infinity, 14)),
+                      ],
+                    ),
                     const SizedBox(height: 16),
-                    Row(children: [
-                      _box(100, 13),
-                      const Spacer(),
-                      _box(55, 16),
-                    ]),
+                    Row(
+                      children: [_box(100, 13), const Spacer(), _box(55, 16)],
+                    ),
                   ],
                 ),
               ),
@@ -1154,11 +1144,11 @@ class _SkeletonCardState extends State<_SkeletonCard>
 
   // Helper that builds a grey rounded rectangle used as a content placeholder.
   Widget _box(double width, double height, {double radius = 6}) => Container(
-        width: width == double.infinity ? null : width,
-        height: height,
-        decoration: BoxDecoration(
-          color: Colors.grey.shade300,
-          borderRadius: BorderRadius.circular(radius),
-        ),
-      );
+    width: width == double.infinity ? null : width,
+    height: height,
+    decoration: BoxDecoration(
+      color: Colors.grey.shade300,
+      borderRadius: BorderRadius.circular(radius),
+    ),
+  );
 }
