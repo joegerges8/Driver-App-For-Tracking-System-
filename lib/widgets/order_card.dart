@@ -18,8 +18,7 @@ class OrderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final delivery = context.watch<DeliveryProvider>();
-    final isOngoing =
-        delivery.hasActiveDelivery && delivery.currentOrder?.id == order.id;
+    final isOngoing = delivery.isDelivering(order.id);
 
     return Column(
       mainAxisSize: MainAxisSize.min,

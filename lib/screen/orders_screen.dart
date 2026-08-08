@@ -161,13 +161,14 @@ class _OrdersScreenState extends State<OrdersScreen>
     final l10n = context.l10n;
     final delivery = context.watch<DeliveryProvider>();
 
-    // Determine whether there is currently an order being actively delivered.
-    // Used only for the earnings strip "In Progress" pill.
-    final isActive = delivery.hasActiveDelivery;
+    // Determine whether any order is being actively delivered. The driver can
+    // be carrying several at once, so this is a count, not a single order.
+    final activeIds = delivery.activeOrderIds;
+    final isActive = activeIds.isNotEmpty;
 
-    // Pending tab: all orders except the one currently being delivered.
+    // Pending tab: all orders except the ones currently being delivered.
     final pendingOrders = delivery.orders
-        .where((o) => !(isActive && o.id == delivery.currentOrder!.id))
+        .where((o) => !activeIds.contains(o.id))
         .toList();
 
     return Scaffold(
@@ -535,9 +536,8 @@ class _OrderList extends StatelessWidget {
         // callback/builder, not the main build method — no rebuild needed.
         final delivery = context.read<DeliveryProvider>();
 
-        // Determine if this order is the one currently being actively delivered.
-        final isCurrentActive =
-            delivery.hasActiveDelivery && delivery.currentOrder?.id == order.id;
+        // Determine if this order is one of the ones being actively delivered.
+        final isCurrentActive = delivery.isDelivering(order.id);
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
