@@ -1,3 +1,4 @@
+import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/provider/current_location_provider.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
@@ -69,13 +70,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   }
 
   Set<Marker> _buildMarkers(LatLng currentLocation) {
+    final l10n = context.l10n;
     return {
       Marker(
         markerId: const MarkerId("current_location"),
         position: currentLocation,
-        infoWindow: const InfoWindow(
-          title: "Current Location",
-          snippet: "You are here!",
+        infoWindow: InfoWindow(
+          title: l10n.currentLocation,
+          snippet: l10n.youAreHere,
         ),
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
       ),
@@ -137,9 +139,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                 color: Colors.grey[200],
                                 alignment: Alignment.center,
                                 padding: const EdgeInsets.all(16),
-                                child: const Text(
-                                  'Google Maps is not configured for web.\n'
-                                  'Run with --dart-define=GOOGLE_MAPS_API_KEY=YOUR_KEY',
+                                child: Text(
+                                  context.l10n.mapsNotConfigured,
                                   textAlign: TextAlign.center,
                                 ),
                               ),
@@ -154,13 +155,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                   if (locationProvider.isLoading)
                     Container(
                       color: Colors.white.withAlpha(200),
-                      child: const Center(
+                      child: Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            CircularProgressIndicator(),
-                            SizedBox(height: 15),
-                            Text("Getting your location...."),
+                            const CircularProgressIndicator(),
+                            const SizedBox(height: 15),
+                            Text(context.l10n.gettingYourLocation),
                           ],
                         ),
                       ),

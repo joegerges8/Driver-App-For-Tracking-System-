@@ -19,6 +19,7 @@
 //                     area (Beirut, Metn, Keserwan, ...). Replaced an earlier
 //                     per-city filter; see _AreaFilterBar for why.
 
+import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
@@ -157,6 +158,7 @@ class _OrdersScreenState extends State<OrdersScreen>
   Widget build(BuildContext context) {
     // context.watch rebuilds this widget automatically whenever DeliveryProvider
     // calls notifyListeners() (e.g. after a fetch completes).
+    final l10n = context.l10n;
     final delivery = context.watch<DeliveryProvider>();
 
     // Determine whether there is currently an order being actively delivered.
@@ -171,9 +173,9 @@ class _OrdersScreenState extends State<OrdersScreen>
     return Scaffold(
       backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: const Text(
-          'My Orders',
-          style: TextStyle(fontWeight: FontWeight.bold),
+        title: Text(
+          l10n.myOrders,
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
@@ -187,15 +189,17 @@ class _OrdersScreenState extends State<OrdersScreen>
           isScrollable: true,
           tabAlignment: TabAlignment.start,
           tabs: [
-            Tab(text: 'All (${_filterByArea(delivery.orders).length})'),
-            Tab(text: 'Pending (${_filterByArea(pendingOrders).length})'),
+            Tab(text: l10n.tabAll(_filterByArea(delivery.orders).length)),
+            Tab(text: l10n.tabPending(_filterByArea(pendingOrders).length)),
             Tab(
-              text:
-                  'Returned (${_filterByArea(delivery.returnedOrders).length})',
+              text: l10n.tabReturned(
+                _filterByArea(delivery.returnedOrders).length,
+              ),
             ),
             Tab(
-              text:
-                  'Completed (${_filterByArea(delivery.completedOrders).length})',
+              text: l10n.tabCompleted(
+                _filterByArea(delivery.completedOrders).length,
+              ),
             ),
           ],
         ),
@@ -209,17 +213,20 @@ class _OrdersScreenState extends State<OrdersScreen>
             );
           }
         },
-        child: _buildBody(delivery, pendingOrders, isActive),
+        child: _buildBody(context, delivery, pendingOrders, isActive),
       ),
     );
   }
 
   // Decides what to show in the body based on the current loading/error state.
   Widget _buildBody(
+    BuildContext context,
     DeliveryProvider delivery,
     List<OrderModel> pendingOrders,
     bool isActive,
   ) {
+    final l10n = context.l10n;
+
     // Show skeleton cards while the initial fetch is in progress.
     if (delivery.isLoadingOrders) {
       return const _SkeletonList();
@@ -278,17 +285,17 @@ class _OrdersScreenState extends State<OrdersScreen>
               // All tab — every assigned order.
               _OrderList(
                 orders: _filterByArea(delivery.orders),
-                emptyMessage: 'No orders assigned yet',
+                emptyMessage: l10n.noOrdersAssigned,
               ),
               // Pending tab — orders not started yet.
               _OrderList(
                 orders: _filterByArea(pendingOrders),
-                emptyMessage: 'No pending orders',
+                emptyMessage: l10n.noPendingOrders,
               ),
               // Returned tab — orders the driver marked as returned.
               _OrderList(
                 orders: _filterByArea(delivery.returnedOrders),
-                emptyMessage: 'No returned orders',
+                emptyMessage: l10n.noReturnedOrders,
               ),
               // Done tab — read-only cards for completed deliveries.
               _CompletedOrderList(
@@ -343,9 +350,12 @@ class _EarningsSummaryStrip extends StatelessWidget {
       ),
       child: Row(
         children: [
-          _StatColumn(label: 'Total Earned', value: '\$$total'),
+          _StatColumn(label: context.l10n.totalEarned, value: '\$$total'),
           const Spacer(),
-          _StatColumn(label: 'Completed', value: '${completedOrders.length}'),
+          _StatColumn(
+            label: context.l10n.completed,
+            value: '${completedOrders.length}',
+          ),
           // The "In Progress" pill is conditionally shown only when the driver
           // has accepted an order and is currently on the way.
           if (isActive) ...[
@@ -356,13 +366,13 @@ class _EarningsSummaryStrip extends StatelessWidget {
                 color: Colors.white24,
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.local_shipping, color: Colors.white, size: 13),
-                  SizedBox(width: 4),
+                  const Icon(Icons.local_shipping, color: Colors.white, size: 13),
+                  const SizedBox(width: 4),
                   Text(
-                    'In Progress',
-                    style: TextStyle(
+                    context.l10n.inProgress,
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
@@ -441,14 +451,16 @@ class _AreaFilterBar extends StatelessWidget {
           children: [
             _chip(
               context,
-              label: 'All',
+              label: context.l10n.filterAll,
               selected: selectedArea == null,
               onTap: () => onSelected(''),
             ),
             ...areas.map(
               (area) => _chip(
                 context,
-                label: area,
+                // Area names come from the backend in English; only the
+                // catch-all bucket has a translation to show.
+                label: area == _unknownArea ? context.l10n.areaOther : area,
                 selected: selectedArea == area,
                 onTap: () => onSelected(area),
               ),
@@ -646,9 +658,9 @@ class _OrderListCard extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Pickup',
-                              style: TextStyle(
+                            Text(
+                              context.l10n.pickup,
+                              style: const TextStyle(
                                 color: Colors.black38,
                                 fontSize: 11,
                               ),
@@ -678,9 +690,9 @@ class _OrderListCard extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Delivery',
-                              style: TextStyle(
+                            Text(
+                              context.l10n.delivery,
+                              style: const TextStyle(
                                 color: Colors.black38,
                                 fontSize: 11,
                               ),
@@ -763,7 +775,7 @@ class _StatusBadge extends StatelessWidget {
         ),
       ),
       child: Text(
-        isActive ? 'Active' : 'Pending',
+        isActive ? context.l10n.statusActive : context.l10n.statusPending,
         style: TextStyle(
           color: isActive ? Colors.green.shade700 : Colors.orange.shade700,
           fontSize: 11,
@@ -816,8 +828,8 @@ class _CompletedOrderList extends StatelessWidget {
 
     // Show the empty state if there are no completed orders yet.
     if (orders.isEmpty) {
-      return const _EmptyState(
-        message: 'No deliveries completed today',
+      return _EmptyState(
+        message: context.l10n.noDeliveriesToday,
         isCompletedTab: true,
       );
     }
@@ -902,7 +914,7 @@ class _CompletedOrderCard extends StatelessWidget {
                     border: Border.all(color: Colors.green.shade300),
                   ),
                   child: Text(
-                    'Delivered',
+                    context.l10n.statusDelivered,
                     style: TextStyle(
                       color: Colors.green.shade700,
                       fontSize: 11,
@@ -998,8 +1010,8 @@ class _EmptyState extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           isCompletedTab
-              ? 'Completed deliveries will appear here'
-              : 'Pull down to refresh',
+              ? context.l10n.completedWillAppearHere
+              : context.l10n.pullDownToRefresh,
           textAlign: TextAlign.center,
           style: const TextStyle(color: Colors.black26, fontSize: 13),
         ),

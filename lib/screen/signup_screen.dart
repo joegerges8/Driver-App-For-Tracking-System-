@@ -1,8 +1,10 @@
+import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/route.dart';
 import 'package:delivery_boy_app/screen/app_main_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:delivery_boy_app/widgets/auth_widgets.dart';
+import 'package:delivery_boy_app/widgets/language_toggle.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -79,14 +81,14 @@ class _SignupScreenState extends State<SignupScreen> {
     final password = _passwordController.text;
 
     if (fullName.isEmpty || email.isEmpty || phone.isEmpty || password.isEmpty) {
-      _showError('All fields are required');
+      _showError(context.l10n.allFieldsRequired);
       return;
     }
 
     // Catches obvious typos before the network call so the user gets instant feedback.
     // The backend runs the same check as a second guard.
     if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) {
-      _showError('Enter a valid email address');
+      _showError(context.l10n.enterValidEmail);
       return;
     }
 
@@ -113,6 +115,7 @@ class _SignupScreenState extends State<SignupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final auth = context.watch<AuthProvider>();
 
     return Scaffold(
@@ -125,33 +128,51 @@ class _SignupScreenState extends State<SignupScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Slightly shorter header than login since the form has more fields.
-            AuthHeader(
-              icon: Icons.person_add_outlined,
-              title: 'Create Account',
-              subtitle: 'Join the delivery team',
-              heightFactor: 0.32,
+            Stack(
+              children: [
+                AuthHeader(
+                  icon: Icons.person_add_outlined,
+                  title: l10n.createAccount,
+                  subtitle: l10n.joinDeliveryTeam,
+                  heightFactor: 0.32,
+                ),
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  left: 0,
+                  child: SafeArea(
+                    child: Align(
+                      alignment: AlignmentDirectional.topEnd,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 4, right: 8, left: 8),
+                        child: const LanguageSwitchButton(),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(28, 12, 28, 0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Sign Up',
-                    style: TextStyle(
+                  Text(
+                    l10n.signUp,
+                    style: const TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Fill in your details to get started',
+                    l10n.fillYourDetails,
                     style: TextStyle(color: Colors.grey[500], fontSize: 13),
                   ),
                   const SizedBox(height: 24),
                   AuthInputField(
                     controller: _fullNameController,
-                    label: 'Full Name',
+                    label: l10n.fullName,
                     icon: Icons.person_outline,
                     textCapitalization: TextCapitalization.words,
                   ),
@@ -159,7 +180,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   // autocorrect disabled so the keyboard doesn't mangle email addresses.
                   AuthInputField(
                     controller: _emailController,
-                    label: 'Email',
+                    label: l10n.email,
                     icon: Icons.email_outlined,
                     keyboardType: TextInputType.emailAddress,
                     autocorrect: false,
@@ -167,7 +188,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   const SizedBox(height: 14),
                   AuthInputField(
                     controller: _phoneController,
-                    label: 'Phone',
+                    label: l10n.phone,
                     icon: Icons.phone_outlined,
                     keyboardType: TextInputType.phone,
                   ),
@@ -175,7 +196,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   // Password field with show/hide toggle.
                   AuthInputField(
                     controller: _passwordController,
-                    label: 'Password',
+                    label: l10n.password,
                     icon: Icons.lock_outline,
                     obscureText: _obscurePassword,
                     suffixIcon: IconButton(
@@ -192,7 +213,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   ),
                   const SizedBox(height: 28),
                   AuthButton(
-                    label: 'Create Account',
+                    label: l10n.createAccount,
                     loading: auth.isBusy,
                     onPressed: _submit,
                   ),
@@ -202,13 +223,13 @@ class _SignupScreenState extends State<SignupScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        'Already have an account?  ',
+                        l10n.alreadyHaveAccount,
                         style: TextStyle(color: Colors.grey[600], fontSize: 14),
                       ),
                       GestureDetector(
                         onTap: auth.isBusy ? null : () => Navigator.pop(context),
                         child: Text(
-                          'Log In',
+                          l10n.logIn,
                           style: TextStyle(
                             color: buttonMainColor,
                             fontWeight: FontWeight.bold,

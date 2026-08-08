@@ -1,9 +1,11 @@
+import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/route.dart';
 import 'package:delivery_boy_app/screen/app_main_screen.dart';
 import 'package:delivery_boy_app/screen/signup_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:delivery_boy_app/widgets/auth_widgets.dart';
+import 'package:delivery_boy_app/widgets/language_toggle.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -60,7 +62,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final password = _passwordController.text;
 
     if (email.isEmpty || password.isEmpty) {
-      _showError('Email and password are required');
+      _showError(context.l10n.emailPasswordRequired);
       return;
     }
 
@@ -82,6 +84,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final auth = context.watch<AuthProvider>();
 
     return Scaffold(
@@ -92,33 +95,53 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AuthHeader(
-              icon: Icons.local_shipping_outlined,
-              title: 'Driver Portal',
-              subtitle: 'Welcome back',
-              heightFactor: 0.38,
+            // The language button is stacked over the header so a driver can
+            // switch to Arabic before they have an account to save it against.
+            Stack(
+              children: [
+                AuthHeader(
+                  icon: Icons.local_shipping_outlined,
+                  title: l10n.driverPortal,
+                  subtitle: l10n.welcomeBack,
+                  heightFactor: 0.38,
+                ),
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  left: 0,
+                  child: SafeArea(
+                    child: Align(
+                      alignment: AlignmentDirectional.topEnd,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 4, right: 8, left: 8),
+                        child: const LanguageSwitchButton(),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(28, 12, 28, 0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Sign In',
-                    style: TextStyle(
+                  Text(
+                    l10n.signIn,
+                    style: const TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Enter your credentials to continue',
+                    l10n.enterCredentials,
                     style: TextStyle(color: Colors.grey[500], fontSize: 13),
                   ),
                   const SizedBox(height: 28),
                   AuthInputField(
                     controller: _emailController,
-                    label: 'Email',
+                    label: l10n.email,
                     icon: Icons.email_outlined,
                     keyboardType: TextInputType.emailAddress,
                     autocorrect: false,
@@ -127,7 +150,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   // Password field with show/hide toggle.
                   AuthInputField(
                     controller: _passwordController,
-                    label: 'Password',
+                    label: l10n.password,
                     icon: Icons.lock_outline,
                     obscureText: _obscurePassword,
                     suffixIcon: IconButton(
@@ -144,7 +167,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 32),
                   AuthButton(
-                    label: 'Log In',
+                    label: l10n.logIn,
                     loading: auth.isBusy,
                     onPressed: _submit,
                   ),
@@ -154,7 +177,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        "Don't have an account?  ",
+                        l10n.dontHaveAccount,
                         style: TextStyle(color: Colors.grey[600], fontSize: 14),
                       ),
                       GestureDetector(
@@ -163,7 +186,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             : () => NavigationHelper.push(
                                 context, const SignupScreen()),
                         child: Text(
-                          'Sign Up',
+                          l10n.signUp,
                           style: TextStyle(
                             color: buttonMainColor,
                             fontWeight: FontWeight.bold,

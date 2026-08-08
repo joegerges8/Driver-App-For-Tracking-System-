@@ -1,3 +1,4 @@
+import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/route.dart';
@@ -15,6 +16,7 @@ class OrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final delivery = context.watch<DeliveryProvider>();
     final isOngoing =
         delivery.hasActiveDelivery && delivery.currentOrder?.id == order.id;
@@ -36,7 +38,7 @@ class OrderCard extends StatelessWidget {
           child: Row(
             children: [
               Text(
-                isOngoing ? "Ongoing Order" : "New Order Available",
+                isOngoing ? l10n.ongoingOrder : l10n.newOrderAvailable,
                 style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
@@ -116,7 +118,11 @@ class OrderCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(width: 4),
-                  _locationInfo("Pickup - ", order.pickupAddress, "You"),
+                  _locationInfo(
+                    l10n.pickupLabel,
+                    order.pickupAddress,
+                    l10n.you,
+                  ),
                 ],
               ),
               // Delivery row
@@ -130,7 +136,7 @@ class OrderCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 5),
                   _locationInfo(
-                    "Delivery - ",
+                    l10n.deliveryLabel,
                     order.deliveryAddress,
                     order.customerName,
                   ),
@@ -142,8 +148,8 @@ class OrderCard extends StatelessWidget {
                 width: double.maxFinite,
                 child: CustomButton(
                   title: isOngoing
-                      ? "View ongoing order"
-                      : "View order details",
+                      ? l10n.viewOngoingOrder
+                      : l10n.viewOrderDetails,
                   onPressed: () {
                     context.read<DeliveryProvider>().setCurrentOrder(order);
                     NavigationHelper.push(context, const OrderDetailScreen());
