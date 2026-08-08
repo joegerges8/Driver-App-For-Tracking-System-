@@ -16,6 +16,12 @@
 //   2. Driver taps "Start Delivery" → status = delivering, GPS sharing starts.
 //   3. Driver taps "Mark as Delivered" or "Mark as Returned" → done.
 //
+// Several orders can be at step 2 at the same time — a driver doing a batch run
+// starts each order as they load it, and each one keeps its own status until it
+// is delivered or returned. That is why delivery state is keyed by order id
+// rather than held in a single field: with one shared status, starting a second
+// delivery silently ended the first, and its customer's map froze mid-journey.
+//
 // There is no in-app map, no accept/decline step and no "picked up" step.
 // PICKED_UP is set by the dispatcher from the dashboard — that status is what
 // makes the driver's marker appear on the customer's tracking page, while the
@@ -39,8 +45,16 @@ enum DeliveryStatus {
 
 class DeliveryProvider extends ChangeNotifier {
   // ── Delivery state ────────────────────────────────────────────────────────
-  DeliveryStatus _status = DeliveryStatus.notStarted;
-  OrderModel? _currentOrder; // The order currently selected or being delivered.
+  // Status per order id. An order missing from this map has not been started.
+  // Orders stay in here while they are being delivered and are removed once
+  // they are delivered or returned.
+  final Map<String, DeliveryStatus> _statusById = {};
+
+  OrderModel? _currentOrder; // The order currently open on the detail screen.
+
+  // Set once the in-progress deliveries have been restored from disk, so the
+  // restore only runs on the first refresh after app start.
+  bool _restoredActiveDeliveries = false;
 
   // ── Assigned (pending) orders ─────────────────────────────────────────────
   List<OrderModel> _orders = [];
@@ -58,18 +72,43 @@ class DeliveryProvider extends ChangeNotifier {
   // Orders the driver explicitly marked as returned.
   final List<OrderModel> _returnedOrders = [];
 
-  // Where the driver was when they started the delivery. Shown as the pickup
-  // point on the order detail screen.
-  LatLng? _pickupLocation;
-  String? _pickupAddress;
+  // Where the driver was when they started each delivery, keyed by order id.
+  // Shown as the pickup point on the order detail screen.
+  final Map<String, LatLng> _pickupLocationById = {};
+  final Map<String, String> _pickupAddressById = {};
 
   // ── Public getters ────────────────────────────────────────────────────────
   // Exposing unmodifiable views prevents external code from mutating the lists
   // directly — all changes must go through the provider's methods.
-  DeliveryStatus get status => _status;
+
+  // Status of the order currently open on the detail screen.
+  DeliveryStatus get status => statusOf(_currentOrder?.id);
   OrderModel? get currentOrder => _currentOrder;
-  bool get hasActiveDelivery =>
-      _currentOrder != null && _status == DeliveryStatus.delivering;
+
+  // True when the order on screen is being delivered. Note this is about the
+  // selected order only — use isDelivering() to ask about any other order.
+  bool get hasActiveDelivery => isDelivering(_currentOrder?.id);
+
+  /// Status of any order, whether or not it is the one on screen.
+  DeliveryStatus statusOf(String? orderId) =>
+      _statusById[orderId] ?? DeliveryStatus.notStarted;
+
+  /// Whether this specific order is currently out for delivery.
+  bool isDelivering(String? orderId) =>
+      statusOf(orderId) == DeliveryStatus.delivering;
+
+  /// Ids of every order the driver has started and not yet finished.
+  Set<String> get activeOrderIds => _statusById.entries
+      .where((e) => e.value == DeliveryStatus.delivering)
+      .map((e) => e.key)
+      .toSet();
+
+  /// How many deliveries are in progress at once. The backend derives the same
+  /// number independently (from which orders are receiving GPS pings) to widen
+  /// each customer's ETA, since a driver carrying three orders reaches any one
+  /// of them later than a driver carrying one.
+  int get activeDeliveryCount => activeOrderIds.length;
+
   List<OrderModel> get orders => List.unmodifiable(_orders);
   bool get isLoadingOrders => _isLoadingOrders;
   String? get ordersError => _ordersError;
@@ -132,11 +171,17 @@ class DeliveryProvider extends ChangeNotifier {
   // from GET /api/drivers/me/orders. Sets loading state before the call
   // and clears it in the finally block regardless of success or failure.
   Future<void> refreshMyOrders({required String token}) async {
-    final activeOrderId = hasActiveDelivery ? _currentOrder?.id : null;
-    final activeStatus = _status;
-    final activeOrder = _currentOrder;
-    final activePickupLocation = _pickupLocation;
-    final activePickupAddress = _pickupAddress;
+    await _restoreActiveDeliveries();
+
+    // Snapshot every in-progress delivery, not just the one on screen. Orders
+    // the driver is carrying must survive a refresh even if the backend list
+    // comes back without them.
+    final activeIds = activeOrderIds;
+    final activeOrdersById = {
+      for (final o in [..._orders, if (_currentOrder != null) _currentOrder!])
+        if (activeIds.contains(o.id)) o.id: o,
+    };
+    final previousCurrentId = _currentOrder?.id;
 
     _isLoadingOrders = true;
     _ordersError = null;
@@ -160,56 +205,93 @@ class DeliveryProvider extends ChangeNotifier {
       };
       _orders = parsed.where((o) => !finishedIds.contains(o.id)).toList();
 
-      // Do not reset an in-progress delivery just because Home/Orders refreshed.
-      // Keep the driver's local progress until the order is delivered or returned.
-      if (activeOrderId != null) {
-        final refreshedIndex = _orders.indexWhere((o) => o.id == activeOrderId);
-        if (refreshedIndex >= 0) {
-          final refreshed = _orders[refreshedIndex];
-          final pickupLocation =
-              activePickupLocation ??
-              activeOrder?.pickupLocation ??
-              refreshed.pickupLocation;
-          final pickupAddress =
-              activePickupAddress ??
-              activeOrder?.pickupAddress ??
-              refreshed.pickupAddress;
-          final preserved = _withPickup(
-            refreshed,
-            pickupLocation: pickupLocation,
-            pickupAddress: pickupAddress,
-          );
-          _orders[refreshedIndex] = preserved;
-          _currentOrder = preserved;
-        } else {
-          _currentOrder = activeOrder;
-        }
-        _status = activeStatus;
-        _pickupLocation = activePickupLocation;
-        _pickupAddress = activePickupAddress;
-      } else {
-        _currentOrder = _orders.isNotEmpty ? _orders.first : null;
-        _status = DeliveryStatus.notStarted;
-        _pickupLocation = null;
-        _pickupAddress = null;
-      }
+      // Do not reset in-progress deliveries just because Home/Orders refreshed.
+      // Keep the driver's local progress until each order is delivered or returned.
+      _reapplyActiveOrders(activeOrdersById);
+      _currentOrder = _pickCurrentOrder(previousCurrentId);
     } catch (e) {
       _ordersError = e.toString();
-      if (activeOrderId != null) {
-        _currentOrder = activeOrder;
-        _status = activeStatus;
-        _pickupLocation = activePickupLocation;
-        _pickupAddress = activePickupAddress;
+      if (activeIds.isNotEmpty) {
+        // Keep whatever the driver is carrying — a failed refresh must never
+        // drop an in-progress delivery off the screen.
+        _orders = activeOrdersById.values.toList();
+        _currentOrder = _pickCurrentOrder(previousCurrentId);
       } else {
         _orders = [];
         _currentOrder = null;
-        _status = DeliveryStatus.notStarted;
-        _pickupLocation = null;
-        _pickupAddress = null;
       }
     } finally {
       _isLoadingOrders = false;
       notifyListeners(); // Triggers rebuild with real data or error message.
+    }
+  }
+
+  // Re-applies the driver's local delivery progress on top of a freshly
+  // fetched order list. Orders being delivered keep the pickup point stamped
+  // when the driver set off, and an active order the backend no longer returns
+  // is put back — the driver is physically holding it, so it cannot vanish
+  // from the app just because a list request came back without it.
+  void _reapplyActiveOrders(Map<String, OrderModel> activeOrdersById) {
+    for (final entry in activeOrdersById.entries) {
+      final id = entry.key;
+      final held = entry.value;
+      final index = _orders.indexWhere((o) => o.id == id);
+      final base = index >= 0 ? _orders[index] : held;
+
+      final pickupLocation =
+          _pickupLocationById[id] ?? base.pickupLocation ?? held.pickupLocation;
+      final pickupAddress =
+          _pickupAddressById[id] ?? base.pickupAddress ?? held.pickupAddress;
+
+      final preserved = pickupLocation == null
+          ? base
+          : _withPickup(
+              base,
+              pickupLocation: pickupLocation,
+              pickupAddress: pickupAddress ?? 'Current location',
+            );
+
+      if (index >= 0) {
+        _orders[index] = preserved;
+      } else {
+        _orders.insert(0, preserved);
+      }
+    }
+  }
+
+  // Chooses which order the detail screen should show after a refresh: the one
+  // the driver already had open if it still exists, otherwise an in-progress
+  // delivery, otherwise the top of the list.
+  OrderModel? _pickCurrentOrder(String? previousCurrentId) {
+    if (_orders.isEmpty) return null;
+
+    final previousIndex = previousCurrentId == null
+        ? -1
+        : _orders.indexWhere((o) => o.id == previousCurrentId);
+    if (previousIndex >= 0) return _orders[previousIndex];
+
+    final activeIndex = _orders.indexWhere((o) => isDelivering(o.id));
+    if (activeIndex >= 0) return _orders[activeIndex];
+
+    return _orders.first;
+  }
+
+  // Restores in-progress deliveries after the app was killed and relaunched.
+  // The background location service keeps posting GPS for those orders from
+  // its own isolate, so the ids it holds are the source of truth for what the
+  // driver is still carrying — without this the UI would come back showing
+  // "Start Delivery" for an order already on the road.
+  Future<void> _restoreActiveDeliveries() async {
+    if (_restoredActiveDeliveries) return;
+    _restoredActiveDeliveries = true;
+
+    try {
+      final ids = await BackgroundLocationService.activeOrderIds();
+      for (final id in ids) {
+        _statusById[id] = DeliveryStatus.delivering;
+      }
+    } catch (_) {
+      // Restore is best-effort — a driver can always tap Start Delivery again.
     }
   }
 
@@ -246,11 +328,10 @@ class DeliveryProvider extends ChangeNotifier {
     }
   }
 
-  // Clears the current order. Called when the driver finishes a delivery.
+  // Clears the order shown on the detail screen. Called when the driver
+  // finishes a delivery. Other in-progress deliveries are untouched.
   void dismissCurrentOrder() {
     _currentOrder = null;
-    _pickupLocation = null;
-    _pickupAddress = null;
     notifyListeners();
   }
 
@@ -263,18 +344,11 @@ class DeliveryProvider extends ChangeNotifier {
     _orders.removeWhere((o) => o.id == order.id);
   }
 
-  // Sets the selected order. If the selected order is already in progress,
-  // keep its current step instead of restarting the delivery flow.
+  // Opens an order on the detail screen. Simply selecting an order no longer
+  // touches any delivery state: each order carries its own status, so viewing
+  // order B must not disturb order A, which may be out for delivery.
   void setCurrentOrder(OrderModel order) {
-    if (hasActiveDelivery && _currentOrder?.id == order.id) {
-      notifyListeners();
-      return;
-    }
-
     _currentOrder = order;
-    _status = DeliveryStatus.notStarted;
-    _pickupLocation = null;
-    _pickupAddress = null;
     notifyListeners();
   }
 
@@ -282,24 +356,32 @@ class DeliveryProvider extends ChangeNotifier {
   // when they set off and starts sharing GPS with the backend so the customer
   // tracking page can plot the driver once the dispatcher flips the order to
   // PICKED_UP from the dashboard.
+  //
+  // Starting a second order does not end the first: both stay in _statusById
+  // and the background service posts the driver's position to both.
   void startDelivery({required LatLng driverLocation}) {
-    if (_currentOrder == null) return;
+    final order = _currentOrder;
+    if (order == null) return;
 
-    _pickupLocation = driverLocation;
-    _pickupAddress = 'Current location';
+    const pickupAddress = 'Current location';
+    _pickupLocationById[order.id] = driverLocation;
+    _pickupAddressById[order.id] = pickupAddress;
 
-    // Rebuild the current order with the now-known pickup coordinates.
-    _currentOrder = _withPickup(
-      _currentOrder!,
+    // Rebuild the current order with the now-known pickup coordinates, and keep
+    // the copy in the pending list in sync so the card shows the same thing.
+    final started = _withPickup(
+      order,
       pickupLocation: driverLocation,
-      pickupAddress: _pickupAddress!,
+      pickupAddress: pickupAddress,
     );
+    _currentOrder = started;
+    final index = _orders.indexWhere((o) => o.id == order.id);
+    if (index >= 0) _orders[index] = started;
 
-    _status = DeliveryStatus.delivering;
+    _statusById[order.id] = DeliveryStatus.delivering;
 
-    final orderId = _currentOrder!.id;
-    if (orderId.isNotEmpty) {
-      BackgroundLocationService.startTracking(orderId);
+    if (order.id.isNotEmpty) {
+      BackgroundLocationService.startTracking(order.id);
     }
 
     notifyListeners();
@@ -364,9 +446,8 @@ class DeliveryProvider extends ChangeNotifier {
       // Also update _currentOrder so any screen still watching it reflects the
       // paid status straight away.
       _currentOrder = paidOrder;
+      _finishOrder(paidOrder.id, DeliveryStatus.delivered);
     }
-    _status = DeliveryStatus.delivered;
-    BackgroundLocationService.stopTracking();
     notifyListeners();
   }
 
@@ -376,16 +457,36 @@ class DeliveryProvider extends ChangeNotifier {
     final order = _currentOrder;
     if (order != null) {
       _moveToReturned(order);
+      _finishOrder(order.id, DeliveryStatus.returned);
     }
-    _status = DeliveryStatus.returned;
-    BackgroundLocationService.stopTracking();
     notifyListeners();
   }
 
-  // Resets the delivery state so the driver is ready to start the next order.
+  // Closes out one order: records its final status and stops only its own GPS
+  // stream, so the driver's other deliveries keep reporting. The status is kept
+  // (rather than removed) so a screen still showing this order renders the
+  // finished state instead of falling back to "Start Delivery".
+  void _finishOrder(String orderId, DeliveryStatus status) {
+    _statusById[orderId] = status;
+    _pickupLocationById.remove(orderId);
+    _pickupAddressById.remove(orderId);
+    if (orderId.isNotEmpty) {
+      BackgroundLocationService.stopTrackingOrder(orderId);
+    }
+  }
+
+  // Resets the order on screen so the driver can start it again. Stops that
+  // order's GPS stream only — other in-progress deliveries are unaffected.
   void resetDelivery() {
-    _status = DeliveryStatus.notStarted;
-    BackgroundLocationService.stopTracking();
+    final orderId = _currentOrder?.id;
+    if (orderId != null) {
+      _statusById.remove(orderId);
+      _pickupLocationById.remove(orderId);
+      _pickupAddressById.remove(orderId);
+      if (orderId.isNotEmpty) {
+        BackgroundLocationService.stopTrackingOrder(orderId);
+      }
+    }
     notifyListeners();
   }
 }

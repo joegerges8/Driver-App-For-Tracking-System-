@@ -305,8 +305,7 @@ class OrderDetailScreen extends StatelessWidget {
           ? null
           : Consumer<DeliveryProvider>(
               builder: (context, provider, child) {
-                final isDelivering =
-                    provider.status == DeliveryStatus.delivering;
+                final isDelivering = provider.isDelivering(order.id);
 
                 return Container(
                   color: Colors.white,
