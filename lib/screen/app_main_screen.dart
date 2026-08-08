@@ -1,3 +1,4 @@
+import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/screen/driver_home_screen.dart';
 import 'package:delivery_boy_app/screen/orders_screen.dart';
 import 'package:delivery_boy_app/screen/profile_screen.dart';
@@ -33,9 +34,17 @@ class _AppMainScreenState extends State<AppMainScreen> {
     FontAwesomeIcons.truckFast,
     FontAwesomeIcons.solidCircleUser,
   ];
-  final List<String> _labels = ["Home", "Orders", "Shipment", "Profile"];
+  // Labels are resolved inside build() rather than stored in a field so they
+  // follow the language toggle instead of freezing at whatever was active when
+  // the state object was first created.
+  List<String> _labels(BuildContext context) {
+    final l10n = context.l10n;
+    return [l10n.navHome, l10n.navOrders, l10n.navShipment, l10n.navProfile];
+  }
+
   @override
   Widget build(BuildContext context) {
+    final labels = _labels(context);
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: pages),
       bottomNavigationBar: Container(
@@ -90,7 +99,7 @@ class _AppMainScreenState extends State<AppMainScreen> {
                     ),
                   ),
                   Text(
-                    _labels[index],
+                    labels[index],
                     style: TextStyle(
                       color: isSelected ? buttonMainColor : Colors.black,
                     ),

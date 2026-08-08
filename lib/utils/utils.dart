@@ -1,5 +1,6 @@
 import 'package:cherry_toast/cherry_toast.dart';
 import 'package:cherry_toast/resources/arrays.dart';
+import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:flutter/material.dart';
 
 enum SnackbarType { success, error }
@@ -24,9 +25,12 @@ showAppSnackbar({
           description,
           style: const TextStyle(color: Colors.green),
         ),
-        title: const Text(
-          "Successful",
-          style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+        title: Text(
+          context.l10n.toastSuccess,
+          style: const TextStyle(
+            color: Colors.green,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ).show(context);
       break;
@@ -44,9 +48,12 @@ showAppSnackbar({
           description,
           style: const TextStyle(color: Colors.red),
         ),
-        title: const Text(
-          "Fail",
-          style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+        title: Text(
+          context.l10n.toastFail,
+          style: const TextStyle(
+            color: Colors.red,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ).show(context);
       break;

@@ -1,3 +1,4 @@
+import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/current_location_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
@@ -15,6 +16,7 @@ class OrderDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final order = context.watch<DeliveryProvider>().currentOrder;
 
     return Scaffold(
@@ -22,11 +24,11 @@ class OrderDetailScreen extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        title: Text("Order Details"),
+        title: Text(l10n.orderDetails),
         centerTitle: false,
       ),
       body: order == null
-          ? const Center(child: Text('No order selected'))
+          ? Center(child: Text(l10n.noOrderSelected))
           : SingleChildScrollView(
               padding: EdgeInsets.all(16),
               child: Column(
@@ -42,7 +44,7 @@ class OrderDetailScreen extends StatelessWidget {
                   Padding(
                     padding: EdgeInsets.only(left: 20, top: 12),
                     child: Text(
-                      "Customer Information",
+                      l10n.customerInformation,
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
@@ -61,7 +63,7 @@ class OrderDetailScreen extends StatelessWidget {
                       order.customerName,
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    subtitle: Text("Delivery • ${order.customerPhone}"),
+                    subtitle: Text('${l10n.delivery} • ${order.customerPhone}'),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -104,7 +106,7 @@ class OrderDetailScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      "Order Summary",
+                      l10n.orderSummary,
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
@@ -171,7 +173,7 @@ class OrderDetailScreen extends StatelessWidget {
                         ),
                         SizedBox(width: 10),
                         Text(
-                          order.isPaid ? "Paid" : "Unpaid (COD)",
+                          order.isPaid ? l10n.paid : l10n.unpaidCod,
                           style: TextStyle(
                             fontSize: 16,
                             color: order.isPaid ? iconColor : Colors.orange,
@@ -219,7 +221,7 @@ class OrderDetailScreen extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                "Pickup Location",
+                                l10n.pickupLocation,
                                 style: TextStyle(
                                   fontWeight: FontWeight.w600,
                                   fontSize: 16,
@@ -232,7 +234,7 @@ class OrderDetailScreen extends StatelessWidget {
                               ),
                               SizedBox(height: 2),
                               Text(
-                                "You",
+                                l10n.you,
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: Colors.grey,
@@ -258,7 +260,7 @@ class OrderDetailScreen extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                "Delivery Location",
+                                l10n.deliveryLocation,
                                 style: TextStyle(
                                   fontWeight: FontWeight.w600,
                                   fontSize: 16,
@@ -317,7 +319,7 @@ class OrderDetailScreen extends StatelessWidget {
                                 child: CustomButton(
                                   color: declineOrder,
                                   textColor: Colors.black54,
-                                  title: "Mark as Returned",
+                                  title: l10n.markAsReturned,
                                   onPressed: () => _finishDelivery(
                                     context,
                                     returned: true,
@@ -327,7 +329,7 @@ class OrderDetailScreen extends StatelessWidget {
                               SizedBox(width: 10),
                               Expanded(
                                 child: CustomButton(
-                                  title: "Mark as Delivered",
+                                  title: l10n.markAsDelivered,
                                   onPressed: () => _finishDelivery(
                                     context,
                                     returned: false,
@@ -337,7 +339,7 @@ class OrderDetailScreen extends StatelessWidget {
                             ],
                           )
                         : CustomButton(
-                            title: "Start Delivery",
+                            title: l10n.startDelivery,
                             onPressed: () => _startDelivery(context),
                           ),
                   ),
@@ -356,7 +358,7 @@ class OrderDetailScreen extends StatelessWidget {
       showAppSnackbar(
         context: context,
         type: SnackbarType.success,
-        description: 'Getting your current location… try again in a moment.',
+        description: context.l10n.gettingLocationRetry,
       );
       return;
     }
@@ -376,7 +378,7 @@ class OrderDetailScreen extends StatelessWidget {
     showAppSnackbar(
       context: context,
       type: SnackbarType.success,
-      description: 'Delivery started. Your location is now being shared.',
+      description: context.l10n.deliveryStartedSharing,
     );
   }
 
@@ -388,6 +390,7 @@ class OrderDetailScreen extends StatelessWidget {
     BuildContext context, {
     required bool returned,
   }) async {
+    final l10n = context.l10n;
     final provider = context.read<DeliveryProvider>();
     final token = context.read<AuthProvider>().token ?? '';
     final messenger = ScaffoldMessenger.of(context);
@@ -401,8 +404,8 @@ class OrderDetailScreen extends StatelessWidget {
       context: context,
       type: SnackbarType.success,
       description: returned
-          ? 'Order marked as returned'
-          : 'Order marked as delivered',
+          ? l10n.orderMarkedReturned
+          : l10n.orderMarkedDelivered,
     );
 
     if (navigator.canPop()) navigator.pop();
@@ -412,7 +415,7 @@ class OrderDetailScreen extends StatelessWidget {
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(
-          content: Text('Status sync failed: $e'),
+          content: Text(l10n.statusSyncFailed('$e')),
           backgroundColor: Colors.red,
         ),
       );

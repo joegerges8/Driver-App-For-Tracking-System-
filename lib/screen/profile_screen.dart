@@ -1,7 +1,9 @@
+import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/screen/login_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
+import 'package:delivery_boy_app/widgets/language_toggle.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -9,7 +11,7 @@ import 'package:provider/provider.dart';
 // Layout (top to bottom):
 //   _AvatarCard      — driver initials, name, phone from AuthProvider
 //   _StatsCard       — total delivery count from DeliveryProvider.orders
-//   _SectionCard     — Change Password row (opens _ChangePasswordSheet)
+//   _SectionCard     — Language toggle (English/العربية) and Change Password
 //   Logout button    — confirmation dialog then AuthProvider.logout()
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -38,16 +40,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Log out'),
-        content: const Text('Are you sure you want to log out?'),
+        title: Text(ctx.l10n.logOut),
+        content: Text(ctx.l10n.logOutConfirm),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(ctx.l10n.cancel),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Log out', style: TextStyle(color: buttonMainColor)),
+            child: Text(
+              ctx.l10n.logOut,
+              style: TextStyle(color: buttonMainColor),
+            ),
           ),
         ],
       ),
@@ -69,6 +74,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final auth = context.watch<AuthProvider>();
     final delivery = context.watch<DeliveryProvider>();
     final driver = auth.driver;
@@ -83,7 +89,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Scaffold(
       backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: const Text('Profile'),
+        title: Text(l10n.profileTitle),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         elevation: 0,
@@ -105,9 +111,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 16),
             _SectionCard(
               children: [
+                // Language switch — flipping it rebuilds the whole app in the
+                // chosen language and persists the choice for next launch.
+                // A plain Row rather than a ListTile: the segmented toggle is
+                // wide, and Expanded on the label lets it give way on narrow
+                // screens instead of overflowing the trailing slot.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.language),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Text(
+                          l10n.language,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const LanguageToggle(),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
                 ListTile(
                   leading: const Icon(Icons.lock_outline),
-                  title: const Text('Change Password'),
+                  title: Text(l10n.changePassword),
                   trailing: const Icon(Icons.chevron_right, size: 18),
                   onTap: () => _showChangePasswordSheet(context),
                 ),
@@ -126,7 +155,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 onPressed: _confirmLogout,
-                child: const Text('Log out', style: TextStyle(fontSize: 16)),
+                child: Text(l10n.logOut, style: const TextStyle(fontSize: 16)),
               ),
             ),
           ],
@@ -235,7 +264,10 @@ class _StatsCard extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _StatItem(label: 'Total Deliveries', value: '$totalOrders'),
+            _StatItem(
+              label: context.l10n.totalDeliveries,
+              value: '$totalOrders',
+            ),
           ],
         ),
       ),
@@ -316,6 +348,9 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
   // returned by the backend is displayed in red inside the sheet instead of crashing.
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    // Read the translation before the await: the sheet is popped below, so this
+    // context is gone by the time the snackbar text is needed.
+    final successMessage = context.l10n.passwordUpdated;
     setState(() {
       _loading = true;
       _error = null;
@@ -328,7 +363,7 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
       if (!mounted) return;
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password updated')),
+        SnackBar(content: Text(successMessage)),
       );
     } catch (e) {
       if (!mounted) return;
@@ -340,6 +375,7 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 20, 16, 20 + bottom),
@@ -349,32 +385,33 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Change Password',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            Text(
+              l10n.changePassword,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
             _PasswordField(
               controller: _currentCtrl,
-              label: 'Current password',
-              validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+              label: l10n.currentPassword,
+              validator: (v) =>
+                  (v == null || v.isEmpty) ? l10n.fieldRequired : null,
             ),
             const SizedBox(height: 12),
             _PasswordField(
               controller: _newCtrl,
-              label: 'New password',
+              label: l10n.newPassword,
               validator: (v) {
-                if (v == null || v.isEmpty) return 'Required';
-                if (v.length < 6) return 'At least 6 characters';
+                if (v == null || v.isEmpty) return l10n.fieldRequired;
+                if (v.length < 6) return l10n.atLeastSixCharacters;
                 return null;
               },
             ),
             const SizedBox(height: 12),
             _PasswordField(
               controller: _confirmCtrl,
-              label: 'Confirm new password',
+              label: l10n.confirmNewPassword,
               validator: (v) =>
-                  v != _newCtrl.text ? 'Passwords do not match' : null,
+                  v != _newCtrl.text ? l10n.passwordsDoNotMatch : null,
             ),
             if (_error != null) ...[
               const SizedBox(height: 8),
@@ -402,7 +439,7 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
                           color: Colors.white,
                         ),
                       )
-                    : const Text('Update Password'),
+                    : Text(l10n.updatePassword),
               ),
             ),
           ],
