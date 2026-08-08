@@ -8,32 +8,39 @@
 // It manages:
 //   - The list of assigned (pending) orders from the backend.
 //   - The list of completed (delivered) orders from a separate endpoint.
+//   - The list of returned orders.
 //   - The current order being delivered and its delivery status.
-//   - The driver's live GPS position and the route polyline on the map.
+//
+// Delivery flow (deliberately kept as simple as possible):
+//   1. Driver taps an order  → OrderDetailScreen, status = notStarted.
+//   2. Driver taps "Start Delivery" → status = delivering, GPS sharing starts.
+//   3. Driver taps "Mark as Delivered" or "Mark as Returned" → done.
+//
+// There is no in-app map, no accept/decline step and no "picked up" step.
+// PICKED_UP is set by the dispatcher from the dashboard — that status is what
+// makes the driver's marker appear on the customer's tracking page, while the
+// coordinates themselves are posted by the background location service that
+// starts the moment the driver taps "Start Delivery".
 
 import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/services/api_client.dart';
-import 'package:flutter/foundation.dart';
+import 'package:delivery_boy_app/services/background_location_service.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
-// Represents the step-by-step stages of a single delivery lifecycle.
-// The UI uses this enum to decide which buttons and messages to show
-// on the delivery map and order detail screens.
+// Represents the stages of a single delivery. The UI uses this enum to decide
+// which buttons to show at the bottom of the order detail screen.
 enum DeliveryStatus {
-  waitingForAcceptance, // Order assigned, driver has not yet accepted it.
-  orderAccepted,        // Driver accepted — navigating to pickup point.
-  pickingUp,            // Driver has started moving to pickup location.
-  destinationReached,   // Driver arrived at the delivery destination.
-  markingAsDelivered,   // Driver tapped "Mark as Delivered".
-  delivered,            // Delivery confirmed complete.
-  rejected,             // Driver declined the order.
+  notStarted, // Order opened, driver has not started the delivery yet.
+  delivering, // Driver tapped "Start Delivery" — on the way to the customer.
+  delivered,  // Driver confirmed the delivery was completed.
+  returned,   // Driver could not deliver and returned the order.
 }
 
 class DeliveryProvider extends ChangeNotifier {
 
   // ── Delivery state ────────────────────────────────────────────────────────
-  DeliveryStatus _status = DeliveryStatus.waitingForAcceptance;
+  DeliveryStatus _status = DeliveryStatus.notStarted;
   OrderModel? _currentOrder;   // The order currently selected or being delivered.
 
   // ── Assigned (pending) orders ─────────────────────────────────────────────
@@ -48,16 +55,12 @@ class DeliveryProvider extends ChangeNotifier {
   bool _isLoadingCompleted = false;
   String? _completedError;
 
-  // ── Returned (dismissed) orders ───────────────────────────────────────────
-  // Orders the driver has swiped away. Kept in memory for the Returned tab.
-  List<OrderModel> _returnedOrders = [];
+  // ── Returned orders ───────────────────────────────────────────────────────
+  // Orders the driver swiped away or explicitly marked as returned.
+  final List<OrderModel> _returnedOrders = [];
 
-  // ── Map state ─────────────────────────────────────────────────────────────
-  List<LatLng> _routePoints = [];
-  LatLng? _currentDeliveryBoyPosition;
-  final Set<Polyline> _polylines = {};
-  final Set<Marker> _markers = {};
-
+  // Where the driver was when they started the delivery. Shown as the pickup
+  // point on the order detail screen.
   LatLng? _pickupLocation;
   String? _pickupAddress;
 
@@ -68,10 +71,7 @@ class DeliveryProvider extends ChangeNotifier {
   DeliveryStatus get status => _status;
   OrderModel? get currentOrder => _currentOrder;
   bool get hasActiveDelivery =>
-      _currentOrder != null &&
-      _status != DeliveryStatus.waitingForAcceptance &&
-      _status != DeliveryStatus.delivered &&
-      _status != DeliveryStatus.rejected;
+      _currentOrder != null && _status == DeliveryStatus.delivering;
   List<OrderModel> get orders => List.unmodifiable(_orders);
   bool get isLoadingOrders => _isLoadingOrders;
   String? get ordersError => _ordersError;
@@ -79,10 +79,6 @@ class DeliveryProvider extends ChangeNotifier {
   bool get isLoadingCompleted => _isLoadingCompleted;
   String? get completedError => _completedError;
   List<OrderModel> get returnedOrders => List.unmodifiable(_returnedOrders);
-  List<LatLng> get routePoints => _routePoints;
-  LatLng? get currentDeliveryBoyPosition => _currentDeliveryBoyPosition;
-  Set<Polyline> get polylines => _polylines;
-  Set<Marker> get markers => _markers;
 
   // Creates a copy of an order with updated pickup location fields.
   // OrderModel is immutable (all fields are final), so we must create a new
@@ -141,7 +137,6 @@ class DeliveryProvider extends ChangeNotifier {
     final activeOrder = _currentOrder;
     final activePickupLocation = _pickupLocation;
     final activePickupAddress = _pickupAddress;
-    final activeDriverPosition = _currentDeliveryBoyPosition;
 
     _isLoadingOrders = true;
     _ordersError = null;
@@ -155,16 +150,18 @@ class DeliveryProvider extends ChangeNotifier {
           parsed.add(OrderModel.fromBackend(item));
         }
       }
-      // Filter out orders the driver has already delivered locally. This prevents
-      // a race condition where the PATCH request to mark an order DELIVERED hasn't
-      // reached the server yet by the time refreshMyOrders runs, causing the
-      // order to reappear in the list from the backend response.
-      final completedIds = _completedOrders.map((o) => o.id).toSet();
-      _orders = parsed.where((o) => !completedIds.contains(o.id)).toList();
+      // Filter out orders the driver has already finished locally. This prevents
+      // a race condition where the PATCH request to mark an order DELIVERED or
+      // RETURNED hasn't reached the server yet by the time refreshMyOrders runs,
+      // causing the order to reappear in the list from the backend response.
+      final finishedIds = {
+        ..._completedOrders.map((o) => o.id),
+        ..._returnedOrders.map((o) => o.id),
+      };
+      _orders = parsed.where((o) => !finishedIds.contains(o.id)).toList();
 
-      // Do not reset an accepted/in-progress delivery just because Home/Orders
-      // refreshed. Keep the driver's local progress until the order is delivered
-      // or rejected.
+      // Do not reset an in-progress delivery just because Home/Orders refreshed.
+      // Keep the driver's local progress until the order is delivered or returned.
       if (activeOrderId != null) {
         final refreshedIndex = _orders.indexWhere((o) => o.id == activeOrderId);
         if (refreshedIndex >= 0) {
@@ -190,10 +187,9 @@ class DeliveryProvider extends ChangeNotifier {
         _status = activeStatus;
         _pickupLocation = activePickupLocation;
         _pickupAddress = activePickupAddress;
-        _currentDeliveryBoyPosition = activeDriverPosition;
       } else {
         _currentOrder = _orders.isNotEmpty ? _orders.first : null;
-        _status = DeliveryStatus.waitingForAcceptance;
+        _status = DeliveryStatus.notStarted;
         _pickupLocation = null;
         _pickupAddress = null;
       }
@@ -204,11 +200,10 @@ class DeliveryProvider extends ChangeNotifier {
         _status = activeStatus;
         _pickupLocation = activePickupLocation;
         _pickupAddress = activePickupAddress;
-        _currentDeliveryBoyPosition = activeDriverPosition;
       } else {
         _orders = [];
         _currentOrder = null;
-        _status = DeliveryStatus.waitingForAcceptance;
+        _status = DeliveryStatus.notStarted;
         _pickupLocation = null;
         _pickupAddress = null;
       }
@@ -251,16 +246,11 @@ class DeliveryProvider extends ChangeNotifier {
     }
   }
 
-  // Clears the current order and resets all map state (route, markers, position).
-  // Called when the driver finishes or cancels a delivery.
+  // Clears the current order. Called when the driver finishes a delivery.
   void dismissCurrentOrder() {
     _currentOrder = null;
     _pickupLocation = null;
     _pickupAddress = null;
-    _routePoints.clear();
-    _polylines.clear();
-    _markers.clear();
-    _currentDeliveryBoyPosition = null;
     notifyListeners();
   }
 
@@ -269,20 +259,24 @@ class DeliveryProvider extends ChangeNotifier {
   // order is reset to the next available order (or null if the list is empty).
   // The dismissed order is kept in _returnedOrders for the Returned tab.
   void dismissOrder(OrderModel order) {
-    _returnedOrders.insert(0, order);
-    _orders.removeWhere((o) => o.id == order.id);
+    _moveToReturned(order);
     if (_currentOrder?.id == order.id) {
       _currentOrder = _orders.isNotEmpty ? _orders.first : null;
       if (_currentOrder == null) {
         _pickupLocation = null;
         _pickupAddress = null;
-        _routePoints.clear();
-        _polylines.clear();
-        _markers.clear();
-        _currentDeliveryBoyPosition = null;
       }
     }
     notifyListeners();
+  }
+
+  // Moves an order out of the pending list and into the Returned tab.
+  // Does not notify — callers batch their own notifyListeners() call.
+  void _moveToReturned(OrderModel order) {
+    if (!_returnedOrders.any((o) => o.id == order.id)) {
+      _returnedOrders.insert(0, order);
+    }
+    _orders.removeWhere((o) => o.id == order.id);
   }
 
   // Sets the selected order. If the selected order is already in progress,
@@ -294,95 +288,36 @@ class DeliveryProvider extends ChangeNotifier {
     }
 
     _currentOrder = order;
-    _status = DeliveryStatus.waitingForAcceptance;
+    _status = DeliveryStatus.notStarted;
     _pickupLocation = null;
     _pickupAddress = null;
-    _routePoints.clear();
-    _polylines.clear();
-    _markers.clear();
-    _currentDeliveryBoyPosition = null;
     notifyListeners();
   }
 
-  // Called when the driver taps "Accept". Records the driver's current GPS
-  // position as the pickup location and advances the status.
-  void acceptOrder({required LatLng pickupLocation}) {
+  // Called when the driver taps "Start Delivery". Records where the driver was
+  // when they set off and starts sharing GPS with the backend so the customer
+  // tracking page can plot the driver once the dispatcher flips the order to
+  // PICKED_UP from the dashboard.
+  void startDelivery({required LatLng driverLocation}) {
     if (_currentOrder == null) return;
 
-    _pickupLocation = pickupLocation;
+    _pickupLocation = driverLocation;
     _pickupAddress = 'Current location';
 
     // Rebuild the current order with the now-known pickup coordinates.
     _currentOrder = _withPickup(
       _currentOrder!,
-      pickupLocation: pickupLocation,
+      pickupLocation: driverLocation,
       pickupAddress: _pickupAddress!,
     );
 
-    _status = DeliveryStatus.orderAccepted;
-    _routePoints.clear();
-    _polylines.clear();
-    _markers.clear();
-    _currentDeliveryBoyPosition = pickupLocation;
-    notifyListeners();
-  }
+    _status = DeliveryStatus.delivering;
 
-  // Stores the decoded route polyline points for drawing on the map.
-  void setRoutePoints(List<LatLng> points) {
-    _routePoints = points;
-    notifyListeners();
-  }
-
-  // Called when the driver declines an order.
-  void rejectOrder() {
-    _status = DeliveryStatus.rejected;
-    _routePoints.clear();
-    _polylines.clear();
-    _markers.clear();
-    _currentDeliveryBoyPosition = null;
-    notifyListeners();
-  }
-
-  // Advances from "accepted" to "picking up" — driver is now en route to pickup.
-  void startPickup() {
-    _status = DeliveryStatus.pickingUp;
-    _currentDeliveryBoyPosition =
-        _currentDeliveryBoyPosition ?? _pickupLocation ?? _currentOrder?.pickupLocation;
-    notifyListeners();
-  }
-
-  // Updates the blue dot on the map as the driver moves.
-  void updateDriverPosition(LatLng position) {
-    _currentDeliveryBoyPosition = position;
-    notifyListeners();
-  }
-
-  // Called when the driver arrives at the customer's address.
-  void markAsPickedUp() {
-    _status = DeliveryStatus.destinationReached;
-    notifyListeners();
-  }
-
-  // Updates UI immediately, then syncs the status to the backend.
-  // Throws if the network call fails so the caller can show an error to the driver.
-  Future<void> markPickedUp({required String token}) async {
-    final orderId = _currentOrder?.id;
-    markAsPickedUp(); // instant UI update
-    if (orderId == null || orderId.isEmpty) return;
-    try {
-      await ApiClient.updateOrderStatus(
-        token: token,
-        orderId: orderId,
-        status: 'PICKED_UP',
-      );
-    } catch (e) {
-      rethrow; // caller shows error snackbar
+    final orderId = _currentOrder!.id;
+    if (orderId.isNotEmpty) {
+      BackgroundLocationService.startTracking(orderId);
     }
-  }
 
-  // Called when the driver taps "Mark as Delivered".
-  void markAdDelivered() {
-    _status = DeliveryStatus.markingAsDelivered;
     notifyListeners();
   }
 
@@ -390,7 +325,7 @@ class DeliveryProvider extends ChangeNotifier {
   // Throws if the network call fails so the caller can show an error to the driver.
   Future<void> markDelivered({required String token}) async {
     final orderId = _currentOrder?.id;
-    completeDeliveery(); // instant UI update — removes from pending, adds to completed
+    completeDelivery(); // instant UI update — removes from pending, adds to completed
     if (orderId == null || orderId.isEmpty) return;
     try {
       await ApiClient.updateOrderStatus(
@@ -403,17 +338,34 @@ class DeliveryProvider extends ChangeNotifier {
     }
   }
 
-  // Called after the backend confirms the delivery — order is fully complete.
-  // Removes the order from the pending list and prepends it to completedOrders
-  // so the Completed tab and earnings strip update immediately without a refetch.
-  void completeDeliveery() {
+  // Updates UI immediately, then syncs RETURNED to the backend.
+  // Throws if the network call fails so the caller can show an error to the driver.
+  Future<void> markReturned({required String token}) async {
+    final orderId = _currentOrder?.id;
+    completeReturn(); // instant UI update — moves the order to the Returned tab
+    if (orderId == null || orderId.isEmpty) return;
+    try {
+      await ApiClient.updateOrderStatus(
+        token: token,
+        orderId: orderId,
+        status: 'RETURNED',
+      );
+    } catch (e) {
+      rethrow; // caller shows error snackbar
+    }
+  }
+
+  // Local state update for a finished delivery. Removes the order from the
+  // pending list and prepends it to completedOrders so the Completed tab and
+  // earnings strip update immediately without a refetch.
+  void completeDelivery() {
     if (_currentOrder != null) {
       // Create a paid copy of the order before moving it to the completed list.
       // This is the "optimistic UI update" pattern: we assume the backend PATCH
       // will succeed and update the local state immediately so the driver sees
       // "Paid" the instant they tap "Mark as Delivered", without having to wait
       // for the network round-trip to finish. If the API call later fails, the
-      // caller (delivery_map_screen) shows an error snackbar.
+      // caller (order_detail_screen) shows an error snackbar.
       final paidOrder = _withPaid(_currentOrder!);
 
       // Remove the order from the active/pending list now that it is done.
@@ -425,21 +377,31 @@ class DeliveryProvider extends ChangeNotifier {
         _completedOrders = [paidOrder, ..._completedOrders];
       }
 
-      // Also update _currentOrder so any screen still watching it (e.g. the
-      // order detail screen) reflects the paid status straight away.
+      // Also update _currentOrder so any screen still watching it reflects the
+      // paid status straight away.
       _currentOrder = paidOrder;
     }
     _status = DeliveryStatus.delivered;
+    BackgroundLocationService.stopTracking();
     notifyListeners();
   }
 
-  // Resets the delivery state so the driver is ready to accept a new order.
-  void reseDelivery() {
-    _status = DeliveryStatus.waitingForAcceptance;
-    _routePoints = [];
-    _polylines.clear();
-    _markers.clear();
-    _currentDeliveryBoyPosition = null;
+  // Local state update for an order the driver brought back. Moves it out of
+  // the pending list and into the Returned tab.
+  void completeReturn() {
+    final order = _currentOrder;
+    if (order != null) {
+      _moveToReturned(order);
+    }
+    _status = DeliveryStatus.returned;
+    BackgroundLocationService.stopTracking();
+    notifyListeners();
+  }
+
+  // Resets the delivery state so the driver is ready to start the next order.
+  void resetDelivery() {
+    _status = DeliveryStatus.notStarted;
+    BackgroundLocationService.stopTracking();
     notifyListeners();
   }
 }

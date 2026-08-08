@@ -107,10 +107,7 @@ class _OrdersScreenState extends State<OrdersScreen>
 
     // Determine whether there is currently an order being actively delivered.
     // Used only for the earnings strip "In Progress" pill.
-    final isActive = delivery.currentOrder != null &&
-        delivery.status != DeliveryStatus.waitingForAcceptance &&
-        delivery.status != DeliveryStatus.delivered &&
-        delivery.status != DeliveryStatus.rejected;
+    final isActive = delivery.hasActiveDelivery;
 
     // Pending tab: all orders except the one currently being delivered.
     final pendingOrders = delivery.orders
@@ -446,7 +443,7 @@ class _CityFilterBar extends StatelessWidget {
 //
 // A scrollable list of orders. Each item is wrapped in a Dismissible widget
 // so the driver can swipe left to remove an order.
-// Tapping an order opens the OrderDetailScreen where it can be accepted.
+// Tapping an order opens the OrderDetailScreen where the delivery is started.
 
 class _OrderList extends StatelessWidget {
   final List<OrderModel> orders;
@@ -477,8 +474,8 @@ class _OrderList extends StatelessWidget {
         final delivery = context.read<DeliveryProvider>();
 
         // Determine if this order is the one currently being actively delivered.
-        final isCurrentActive = delivery.currentOrder?.id == order.id &&
-            delivery.status != DeliveryStatus.waitingForAcceptance;
+        final isCurrentActive =
+            delivery.hasActiveDelivery && delivery.currentOrder?.id == order.id;
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
@@ -535,7 +532,7 @@ class _OrderList extends StatelessWidget {
               isCurrentActive: isCurrentActive,
               onTap: () {
                 // Set this order as the current one in the provider, then
-                // navigate to the detail screen where it can be accepted.
+                // navigate to the detail screen where the delivery is started.
                 context.read<DeliveryProvider>().setCurrentOrder(order);
                 NavigationHelper.push(context, const OrderDetailScreen());
               },
