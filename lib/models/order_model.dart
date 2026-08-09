@@ -55,6 +55,12 @@ class OrderModel {
   // column, which mirrors the Shopify order note. Empty when the order carries
   // no note, and the detail screen then shows no note card at all.
   final String note;
+
+  // What the driver themselves wrote about this order — "nobody home, tried
+  // 3pm", "gate code 4412". Unlike note above, the app writes this one: it is
+  // saved to the backend's orders.driver_note column and never goes to
+  // Shopify. Empty until the driver writes something.
+  final String driverNote;
   final LatLng pickupLocation;
   final LatLng deliveryLocation;
   final String pickupAddress;
@@ -105,12 +111,47 @@ class OrderModel {
     required this.deliveryAddress,
     this.lineItems = const [],
     this.note = '',
+    this.driverNote = '',
     this.city = '',
     this.area = '',
     this.isPaid = false,
     this.isPrepaid = false,
     this.deliveredAt,
   });
+
+  // Returns a copy with only the named fields changed. OrderModel is immutable
+  // — every field is final — so an update means building a new instance, and
+  // listing all seventeen fields by hand at each call site is how a field ends
+  // up silently reset to its default when a new one is added.
+  OrderModel copyWith({
+    LatLng? pickupLocation,
+    String? pickupAddress,
+    String? driverNote,
+    bool? isPaid,
+  }) {
+    return OrderModel(
+      id: id,
+      customerName: customerName,
+      customerPhone: customerPhone,
+      item: item,
+      price: price,
+      lineItems: lineItems,
+      note: note,
+      driverNote: driverNote ?? this.driverNote,
+      pickupLocation: pickupLocation ?? this.pickupLocation,
+      deliveryLocation: deliveryLocation,
+      pickupAddress: pickupAddress ?? this.pickupAddress,
+      deliveryAddress: deliveryAddress,
+      city: city,
+      area: area,
+      isPaid: isPaid ?? this.isPaid,
+      // isPrepaid describes how the order arrived, so nothing that happens
+      // during the delivery may change it — that is the distinction the
+      // earnings totals rely on. It is deliberately not a parameter here.
+      isPrepaid: isPrepaid,
+      deliveredAt: deliveredAt,
+    );
+  }
 
   // What this order actually contributes to the driver's earnings: the cash
   // collected on delivery, which is nothing for an order paid online.
@@ -191,6 +232,7 @@ class OrderModel {
       // Null for orders from a backend without the note column, and for the
       // many orders that simply have no note.
       note: (json['note'] ?? '').toString().trim(),
+      driverNote: (json['driver_note'] ?? '').toString().trim(),
       price: totalPrice == null ? 0 : totalPrice.round(),
       pickupLocation: pickupLocation,
       deliveryLocation: deliveryLocation,
