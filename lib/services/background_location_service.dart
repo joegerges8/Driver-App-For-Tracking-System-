@@ -161,7 +161,7 @@ void _onStart(ServiceInstance service) async {
 
       // One GPS read, fanned out to every active order. The driver has a single
       // position; each order simply records it against its own tracking token.
-      await Future.wait(
+      final responses = await Future.wait(
         orderIds.map(
           (orderId) => http.post(
             Uri.parse('$_baseUrl/api/drivers/me/orders/$orderId/location'),
@@ -176,6 +176,25 @@ void _onStart(ServiceInstance service) async {
           ),
         ),
       );
+
+      // A 404 means the backend no longer has that order for this driver: the
+      // dispatcher deleted it or reassigned it. Nothing will ever accept its
+      // pings again, so drop it here — otherwise a deleted order kept the
+      // foreground notification and the GPS radio alive indefinitely.
+      final gone = <String>{};
+      for (var i = 0; i < orderIds.length; i++) {
+        if (responses[i].statusCode == 404) gone.add(orderIds[i]);
+      }
+
+      if (gone.isNotEmpty) {
+        final remaining =
+            orderIds.where((id) => !gone.contains(id)).toList();
+        await prefs.setStringList(_orderIdsKey, remaining);
+        if (remaining.isEmpty) {
+          service.stopSelf();
+          return;
+        }
+      }
     } catch (_) {
       // Silent — a missed ping is acceptable
     }

@@ -28,6 +28,8 @@
 // coordinates themselves are posted by the background location service that
 // starts the moment the driver taps "Start Delivery".
 
+import 'dart:async';
+
 import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/services/api_client.dart';
 import 'package:delivery_boy_app/services/background_location_service.dart';
@@ -67,6 +69,24 @@ class DeliveryProvider extends ChangeNotifier {
   List<OrderModel> _completedOrders = [];
   bool _isLoadingCompleted = false;
   String? _completedError;
+
+  // Orders this device marked DELIVERED whose PATCH has not been acknowledged
+  // by the backend yet. Only these survive a completed-orders fetch that comes
+  // back without them — anything else the backend omits is genuinely gone.
+  final Set<String> _unsyncedCompletedIds = {};
+
+  // True once the Done tab has loaded at least once, so the background poll
+  // knows whether keeping that list fresh is worth a request.
+  bool _completedLoadedOnce = false;
+
+  // ── Background polling ────────────────────────────────────────────────────
+  // The app has no push channel for order changes, so while it is in the
+  // foreground it re-fetches on a timer. Without this, an order the dispatcher
+  // deleted stayed on the driver's screen until the app was restarted.
+  static const Duration pollInterval = Duration(seconds: 30);
+  Timer? _pollTimer;
+  String? _pollToken;
+  bool _isPolling = false;
 
   // ── Returned orders ───────────────────────────────────────────────────────
   // Orders the driver explicitly marked as returned.
@@ -145,7 +165,14 @@ class DeliveryProvider extends ChangeNotifier {
   // Fetches the list of assigned (non-delivered) orders for this driver
   // from GET /api/drivers/me/orders. Sets loading state before the call
   // and clears it in the finally block regardless of success or failure.
-  Future<void> refreshMyOrders({required String token}) async {
+  //
+  // A silent refresh is the one the poll timer fires: it skips the skeleton
+  // loader and swallows network errors, so a driver reading an order is not
+  // interrupted every 30 seconds by a spinner or a transient failure message.
+  Future<void> refreshMyOrders({
+    required String token,
+    bool silent = false,
+  }) async {
     await _restoreActiveDeliveries();
 
     // Snapshot every in-progress delivery, not just the one on screen. Orders
@@ -158,9 +185,11 @@ class DeliveryProvider extends ChangeNotifier {
     };
     final previousCurrentId = _currentOrder?.id;
 
-    _isLoadingOrders = true;
-    _ordersError = null;
-    notifyListeners(); // Triggers skeleton loading UI.
+    if (!silent) {
+      _isLoadingOrders = true;
+      _ordersError = null;
+      notifyListeners(); // Triggers skeleton loading UI.
+    }
 
     try {
       final list = await ApiClient.getMyOrders(token: token);
@@ -182,9 +211,14 @@ class DeliveryProvider extends ChangeNotifier {
 
       // Do not reset in-progress deliveries just because Home/Orders refreshed.
       // Keep the driver's local progress until each order is delivered or returned.
-      _reapplyActiveOrders(activeOrdersById);
+      _reapplyActiveOrders(activeOrdersById, parsed.map((o) => o.id).toSet());
       _currentOrder = _pickCurrentOrder(previousCurrentId);
+      _ordersError = null;
     } catch (e) {
+      // A poll that fails changes nothing: the driver keeps looking at the
+      // list they already had, with no error banner they did not ask for.
+      if (silent) return;
+
       _ordersError = e.toString();
       if (activeIds.isNotEmpty) {
         // Keep whatever the driver is carrying — a failed refresh must never
@@ -202,14 +236,28 @@ class DeliveryProvider extends ChangeNotifier {
   }
 
   // Re-applies the driver's local delivery progress on top of a freshly
-  // fetched order list. Orders being delivered keep the pickup point stamped
-  // when the driver set off, and an active order the backend no longer returns
-  // is put back — the driver is physically holding it, so it cannot vanish
-  // from the app just because a list request came back without it.
-  void _reapplyActiveOrders(Map<String, OrderModel> activeOrdersById) {
+  // fetched order list: orders being delivered keep the pickup point stamped
+  // when the driver set off.
+  //
+  // [liveIds] is every order id the backend just returned. An in-progress
+  // delivery missing from that answer is not a hiccup — the dispatcher deleted
+  // the order, cancelled it or handed it to someone else — so it is dropped
+  // and its GPS stream stopped rather than being pinned back onto the list.
+  // A request that failed outright never reaches here; that path still keeps
+  // whatever the driver was carrying.
+  void _reapplyActiveOrders(
+    Map<String, OrderModel> activeOrdersById,
+    Set<String> liveIds,
+  ) {
     for (final entry in activeOrdersById.entries) {
       final id = entry.key;
       final held = entry.value;
+
+      if (!liveIds.contains(id)) {
+        _forgetOrder(id);
+        continue;
+      }
+
       final index = _orders.indexWhere((o) => o.id == id);
       final base = index >= 0 ? _orders[index] : held;
 
@@ -234,16 +282,45 @@ class DeliveryProvider extends ChangeNotifier {
     }
   }
 
+  // Erases every trace of an order the backend no longer has: its local
+  // delivery status, the pickup point, its place in any list, and the GPS
+  // stream still posting for it. Used when the dispatcher deletes an order
+  // that this driver was carrying.
+  void _forgetOrder(String orderId) {
+    _statusById.remove(orderId);
+    _pickupLocationById.remove(orderId);
+    _pickupAddressById.remove(orderId);
+    _orders.removeWhere((o) => o.id == orderId);
+    if (orderId.isNotEmpty) {
+      BackgroundLocationService.stopTrackingOrder(orderId);
+    }
+  }
+
   // Chooses which order the detail screen should show after a refresh: the one
   // the driver already had open if it still exists, otherwise an in-progress
   // delivery, otherwise the top of the list.
+  //
+  // An order that was open and is now gone clears the screen instead. Sliding
+  // a different order's address and phone number under the driver, in place of
+  // the one they were reading, is the one outcome worse than an empty screen.
   OrderModel? _pickCurrentOrder(String? previousCurrentId) {
-    if (_orders.isEmpty) return null;
+    if (previousCurrentId != null) {
+      final previousIndex = _orders.indexWhere(
+        (o) => o.id == previousCurrentId,
+      );
+      if (previousIndex >= 0) return _orders[previousIndex];
 
-    final previousIndex = previousCurrentId == null
-        ? -1
-        : _orders.indexWhere((o) => o.id == previousCurrentId);
-    if (previousIndex >= 0) return _orders[previousIndex];
+      // An order the driver just delivered or returned has left the pending
+      // list on purpose — keep it on screen so the finished state stays put
+      // until they navigate away themselves.
+      for (final finished in [..._completedOrders, ..._returnedOrders]) {
+        if (finished.id == previousCurrentId) return finished;
+      }
+
+      return null;
+    }
+
+    if (_orders.isEmpty) return null;
 
     final activeIndex = _orders.indexWhere((o) => isDelivering(o.id));
     if (activeIndex >= 0) return _orders[activeIndex];
@@ -274,10 +351,15 @@ class DeliveryProvider extends ChangeNotifier {
   // from GET /api/drivers/me/orders/completed.
   // This is called lazily — only when the driver opens the Done tab —
   // to avoid an unnecessary network request on app startup.
-  Future<void> refreshCompletedOrders({required String token}) async {
-    _isLoadingCompleted = true;
-    _completedError = null;
-    notifyListeners();
+  Future<void> refreshCompletedOrders({
+    required String token,
+    bool silent = false,
+  }) async {
+    if (!silent) {
+      _isLoadingCompleted = true;
+      _completedError = null;
+      notifyListeners();
+    }
 
     try {
       final list = await ApiClient.getCompletedOrders(token: token);
@@ -287,25 +369,79 @@ class DeliveryProvider extends ChangeNotifier {
           parsed.add(OrderModel.fromBackend(item));
         }
       }
-      // Merge: keep locally-completed orders that the backend doesn't know about
-      // yet (the DELIVERED PATCH may still be in-flight). Without this, opening
-      // the Done tab would wipe out the order the driver just delivered.
+      // Merge: keep locally-completed orders whose DELIVERED PATCH has not been
+      // acknowledged yet. Without this, opening the Done tab would wipe out the
+      // order the driver just delivered. Anything else the backend leaves out
+      // has been deleted from the dashboard, so it leaves the tab too.
       final fetchedIds = parsed.map((o) => o.id).toSet();
       _completedOrders = [
         ...parsed,
-        ..._completedOrders.where((o) => !fetchedIds.contains(o.id)),
+        ..._completedOrders.where(
+          (o) =>
+              !fetchedIds.contains(o.id) && _unsyncedCompletedIds.contains(o.id),
+        ),
       ];
+      _completedLoadedOnce = true;
 
       // The backend calling an order delivered settles it, whoever recorded
       // that — the dispatcher, or this driver on another device. A stale copy
       // in the local Returned tab would otherwise show it in both tabs.
       _returnedOrders.removeWhere((o) => fetchedIds.contains(o.id));
+      _completedError = null;
     } catch (e) {
+      if (silent) return;
       _completedError = e.toString();
     } finally {
       _isLoadingCompleted = false;
       notifyListeners();
     }
+  }
+
+  // ── Auto-refresh ──────────────────────────────────────────────────────────
+
+  /// Starts re-fetching orders every [pollInterval] while the app is in the
+  /// foreground, and fetches once straight away. Called on login and whenever
+  /// the app is resumed, so changes made on the dashboard — a deleted order
+  /// above all — reach the driver without them restarting the app.
+  void startAutoRefresh({required String token}) {
+    if (token.isEmpty) return;
+    _pollToken = token;
+
+    _pollTimer ??= Timer.periodic(pollInterval, (_) => _poll());
+    _poll();
+  }
+
+  /// Stops the timer when the app goes to the background or the driver logs
+  /// out. The background location service keeps running on its own; only the
+  /// order-list polling stops.
+  void stopAutoRefresh() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+  }
+
+  // One silent round of polling. Skips itself while a fetch the driver asked
+  // for is already running, so a pull-to-refresh is never fought over.
+  Future<void> _poll() async {
+    final token = _pollToken;
+    if (token == null || token.isEmpty) return;
+    if (_isPolling || _isLoadingOrders || _isLoadingCompleted) return;
+
+    _isPolling = true;
+    try {
+      await refreshMyOrders(token: token, silent: true);
+      // Only worth a request once the driver has actually opened the Done tab.
+      if (_completedLoadedOnce) {
+        await refreshCompletedOrders(token: token, silent: true);
+      }
+    } finally {
+      _isPolling = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    stopAutoRefresh();
+    super.dispose();
   }
 
   // Clears the order shown on the detail screen. Called when the driver
@@ -377,14 +513,18 @@ class DeliveryProvider extends ChangeNotifier {
     final orderId = _currentOrder?.id;
     completeDelivery(); // instant UI update — removes from pending, adds to completed
     if (orderId == null || orderId.isEmpty) return;
+    // Marked until the backend confirms: this is what protects the order from
+    // being dropped by a completed-orders fetch that raced the PATCH.
+    _unsyncedCompletedIds.add(orderId);
     try {
       await ApiClient.updateOrderStatus(
         token: token,
         orderId: orderId,
         status: 'DELIVERED',
       );
+      _unsyncedCompletedIds.remove(orderId);
     } catch (e) {
-      rethrow; // caller shows error snackbar
+      rethrow; // caller shows error snackbar; the id stays marked unsynced
     }
   }
 

@@ -17,7 +17,11 @@ class AppMainScreen extends StatefulWidget {
   State<AppMainScreen> createState() => _AppMainScreenState();
 }
 
-class _AppMainScreenState extends State<AppMainScreen> {
+// WidgetsBindingObserver lets this screen hear about the app being sent to the
+// background and brought back, which is when the driver's order list is most
+// likely to be out of date with the dashboard.
+class _AppMainScreenState extends State<AppMainScreen>
+    with WidgetsBindingObserver {
   // IndexedStack keeps all pages alive so state (map, orders) is preserved on tab switch.
   // ProfileScreen replaces the old Center(child: Text("Profile")) placeholder.
   final List<Widget> pages = [
@@ -40,6 +44,54 @@ class _AppMainScreenState extends State<AppMainScreen> {
   List<String> _labels(BuildContext context) {
     final l10n = context.l10n;
     return [l10n.navHome, l10n.navOrders, l10n.navShipment, l10n.navProfile];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Start polling after the first frame, once providers can be read.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startAutoRefresh());
+  }
+
+  // Held so dispose can stop the timer without reading a provider off a
+  // context that is already being torn down (logout unmounts this screen).
+  DeliveryProvider? _delivery;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _delivery = context.read<DeliveryProvider>();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _delivery?.stopAutoRefresh();
+    super.dispose();
+  }
+
+  // Polls only while the app is actually on screen. Coming back from the
+  // background refreshes immediately, so an order deleted from the dashboard
+  // while the driver was in Maps is gone the moment they switch back.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (!mounted) return;
+
+    if (state == AppLifecycleState.resumed) {
+      _startAutoRefresh();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _delivery?.stopAutoRefresh();
+    }
+  }
+
+  void _startAutoRefresh() {
+    if (!mounted) return;
+    final token = context.read<AuthProvider>().token;
+    if (token == null || token.isEmpty) return;
+    context.read<DeliveryProvider>().startAutoRefresh(token: token);
   }
 
   @override
