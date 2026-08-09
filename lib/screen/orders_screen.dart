@@ -564,7 +564,7 @@ class _OrderList extends StatelessWidget {
 //
 // Visual card for a single pending or active order. Consists of:
 //   - Header: order number + colour-coded status badge.
-//   - Body:   pickup address → delivery address with a connecting line.
+//   - Body:   delivery address.
 //   - Footer: customer name on the left, price + chevron on the right.
 
 class _OrderListCard extends StatelessWidget {
@@ -636,54 +636,11 @@ class _OrderListCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
               child: Column(
                 children: [
-                  // Pickup row — circle icon + vertical line connecting to
-                  // the delivery row below, visually representing a route.
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Column(
-                        children: [
-                          const Icon(
-                            Icons.radio_button_checked,
-                            color: Colors.black38,
-                            size: 18,
-                          ),
-                          // The thin vertical line between the two location icons.
-                          Container(
-                            width: 1,
-                            height: 18,
-                            color: Colors.black12,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              context.l10n.pickup,
-                              style: const TextStyle(
-                                color: Colors.black38,
-                                fontSize: 11,
-                              ),
-                            ),
-                            Text(
-                              order.pickupAddress,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
                   // Delivery row — red pin icon marking the destination.
+                  // A pickup row used to sit above it, joined by a short
+                  // vertical line to read as a route. It only ever said
+                  // "Current location", which is where the driver already is,
+                  // so the destination is the whole of the route worth showing.
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
