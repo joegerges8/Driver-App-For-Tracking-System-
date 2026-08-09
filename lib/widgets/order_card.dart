@@ -6,7 +6,6 @@ import 'package:delivery_boy_app/screen/order_detail_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:delivery_boy_app/utils/utils.dart';
 import 'package:delivery_boy_app/widgets/custom_button.dart';
-import 'package:delivery_boy_app/widgets/dash_vertical_line.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -99,32 +98,10 @@ class OrderCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 20),
-              // Pickup row
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Column(
-                    children: [
-                      const Icon(
-                        Icons.radio_button_checked,
-                        color: Colors.black54,
-                        size: 20,
-                      ),
-                      SizedBox(
-                        height: 35,
-                        child: DashVerticalLine(dashHeight: 6, dashGap: 5),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(width: 4),
-                  _locationInfo(
-                    l10n.pickupLabel,
-                    order.pickupAddress,
-                    l10n.you,
-                  ),
-                ],
-              ),
-              // Delivery row
+              // Delivery row.
+              // The pickup row above it is gone: it always read "Current
+              // location / You", which tells the driver nothing they do not
+              // already know, so only the destination is shown.
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
