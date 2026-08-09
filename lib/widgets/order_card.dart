@@ -79,19 +79,15 @@ class OrderCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    Text.rich(
-                      TextSpan(
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w500,
-                          fontSize: 15,
-                        ),
-                        children: [
-                          TextSpan(text: order.item),
-                          TextSpan(
-                            text: " * ${order.quantity}",
-                            style: const TextStyle(color: Colors.black38),
-                          ),
-                        ],
+                    // Just the order number. A "* 1" used to trail it, printed
+                    // from an OrderModel.quantity field that was hardcoded to 1
+                    // and never reflected what was in the order; the real
+                    // per-product counts live on the order detail screen.
+                    Text(
+                      order.item,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w500,
+                        fontSize: 15,
                       ),
                     ),
                   ],
