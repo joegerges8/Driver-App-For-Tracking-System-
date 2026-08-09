@@ -327,6 +327,11 @@ class DeliveryProvider extends ChangeNotifier {
         ...parsed,
         ..._completedOrders.where((o) => !fetchedIds.contains(o.id)),
       ];
+
+      // The backend calling an order delivered settles it, whoever recorded
+      // that — the dispatcher, or this driver on another device. A stale copy
+      // in the local Returned tab would otherwise show it in both tabs.
+      _returnedOrders.removeWhere((o) => fetchedIds.contains(o.id));
     } catch (e) {
       _completedError = e.toString();
     } finally {
@@ -349,6 +354,10 @@ class DeliveryProvider extends ChangeNotifier {
       _returnedOrders.insert(0, order);
     }
     _orders.removeWhere((o) => o.id == order.id);
+    // Delivered and returned are the two ends of the same order: an order that
+    // goes back out after being delivered must not stay in the Done tab.
+    _completedOrders =
+        _completedOrders.where((o) => o.id != order.id).toList();
   }
 
   // Opens an order on the detail screen. Simply selecting an order no longer
@@ -443,6 +452,12 @@ class DeliveryProvider extends ChangeNotifier {
 
       // Remove the order from the active/pending list now that it is done.
       _orders.removeWhere((o) => o.id == _currentOrder!.id);
+
+      // An order can be returned and then sent out again later. Drop it from
+      // the Returned tab, otherwise it sits in both tabs at once — and because
+      // the returned list only lives in memory, that only came right after a
+      // restart wiped it.
+      _returnedOrders.removeWhere((o) => o.id == _currentOrder!.id);
 
       // Add the paid copy to the front of the completed list so it appears
       // immediately at the top of the "Done" tab without a refetch.
