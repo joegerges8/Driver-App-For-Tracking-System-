@@ -43,7 +43,6 @@ class OrderModel {
   final String customerName;
   final String customerPhone;
   final String item;
-  final int quantity;
   final int price;
 
   // The products in this order. Empty for orders imported before the backend
@@ -93,7 +92,6 @@ class OrderModel {
     required this.customerName,
     required this.customerPhone,
     required this.item,
-    required this.quantity,
     required this.price,
     required this.pickupLocation,
     required this.deliveryLocation,
@@ -113,7 +111,17 @@ class OrderModel {
 
   factory OrderModel.fromBackend(Map<String, dynamic> json) {
     final id = json['id'];
-    final orderNumber = json['order_number'] ?? json['shopify_order_id'];
+
+    // order_number comes from Shopify's order.name, which already carries the
+    // '#' ("#2672"); shopify_order_id, the fallback, does not. Strip whatever
+    // leading '#' is there so the label below adds exactly one — otherwise the
+    // card reads "Order ##2672".
+    final rawOrderNumber = (json['order_number'] ?? json['shopify_order_id'])
+        ?.toString()
+        .trim()
+        .replaceFirst(RegExp(r'^#+'), '');
+    final orderNumber =
+        rawOrderNumber == null || rawOrderNumber.isEmpty ? null : rawOrderNumber;
 
     final firstName = (json['customer_first_name'] ?? '').toString().trim();
     final lastName = (json['customer_last_name'] ?? '').toString().trim();
@@ -172,7 +180,6 @@ class OrderModel {
       customerName: customerName.isNotEmpty ? customerName : 'Customer',
       customerPhone: (json['customer_phone'] ?? '').toString(),
       item: orderNumber == null ? 'Order' : 'Order #$orderNumber',
-      quantity: 1,
       lineItems: _parseLineItems(json['line_items']),
       price: totalPrice == null ? 0 : totalPrice.round(),
       pickupLocation: pickupLocation,
