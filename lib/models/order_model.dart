@@ -49,6 +49,12 @@ class OrderModel {
   // stored line items — the order detail screen falls back to showing just the
   // order number in that case.
   final List<OrderLineItem> lineItems;
+
+  // Instructions written on the order in the Shopify admin — "leave with the
+  // concierge", "call before arriving". Comes from the backend's orders.note
+  // column, which mirrors the Shopify order note. Empty when the order carries
+  // no note, and the detail screen then shows no note card at all.
+  final String note;
   final LatLng pickupLocation;
   final LatLng deliveryLocation;
   final String pickupAddress;
@@ -98,6 +104,7 @@ class OrderModel {
     required this.pickupAddress,
     required this.deliveryAddress,
     this.lineItems = const [],
+    this.note = '',
     this.city = '',
     this.area = '',
     this.isPaid = false,
@@ -181,6 +188,9 @@ class OrderModel {
       customerPhone: (json['customer_phone'] ?? '').toString(),
       item: orderNumber == null ? 'Order' : 'Order #$orderNumber',
       lineItems: _parseLineItems(json['line_items']),
+      // Null for orders from a backend without the note column, and for the
+      // many orders that simply have no note.
+      note: (json['note'] ?? '').toString().trim(),
       price: totalPrice == null ? 0 : totalPrice.round(),
       pickupLocation: pickupLocation,
       deliveryLocation: deliveryLocation,

@@ -114,6 +114,8 @@ class AppLocalizations {
   String get noOrderSelected => _t('noOrderSelected');
   String get customerInformation => _t('customerInformation');
   String get orderSummary => _t('orderSummary');
+  // Heading of the note card: the instructions written on the order in Shopify.
+  String get orderNote => _t('orderNote');
   String get paid => _t('paid');
   String get unpaidCod => _t('unpaidCod');
   // Shown on orders the customer had already paid online: no cash is
@@ -244,6 +246,7 @@ class AppLocalizations {
     'noOrderSelected': 'No order selected',
     'customerInformation': 'Customer Information',
     'orderSummary': 'Order Summary',
+    'orderNote': 'Note',
     'paid': 'Paid',
     'unpaidCod': 'Unpaid (COD)',
     'prepaid': 'Prepaid',
@@ -359,6 +362,7 @@ class AppLocalizations {
     'noOrderSelected': 'لم يتم اختيار أي طلب',
     'customerInformation': 'معلومات العميل',
     'orderSummary': 'ملخص الطلب',
+    'orderNote': 'ملاحظة',
     'paid': 'مدفوع',
     'unpaidCod': 'غير مدفوع (الدفع عند الاستلام)',
     'prepaid': 'مدفوع مسبقاً',

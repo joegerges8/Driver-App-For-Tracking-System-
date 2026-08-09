@@ -218,6 +218,60 @@ class OrderDetailScreen extends StatelessWidget {
                 ),
               ),
             ),
+            // The order note, written on the order in the Shopify admin. It
+            // carries the things the address and the product list cannot say
+            // — "second floor, no lift", "call before arriving" — so it sits
+            // directly under the order summary rather than at the bottom of
+            // the screen. Orders without a note show nothing at all instead of
+            // an empty card.
+            if (order.note.isNotEmpty) ...[
+              SizedBox(height: 12),
+              Material(
+                color: const Color(0xFFFFF8E1),
+                borderRadius: BorderRadius.circular(20),
+                child: Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.sticky_note_2_outlined,
+                        color: const Color(0xFF8D6E00),
+                        size: 22,
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.orderNote,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: const Color(0xFF8D6E00),
+                              ),
+                            ),
+                            SizedBox(height: 6),
+                            // Notes are free text a person typed, so the line
+                            // breaks they used are kept and the text wraps
+                            // instead of being cut off.
+                            Text(
+                              order.note,
+                              style: TextStyle(
+                                fontSize: 14,
+                                height: 1.4,
+                                color: Colors.black87,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             SizedBox(height: 12),
             // Delivery location.
             // The pickup step used to sit above this one, showing "Current
