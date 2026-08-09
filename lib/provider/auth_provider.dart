@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:delivery_boy_app/services/api_client.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,6 +33,18 @@ class AuthProvider extends ChangeNotifier {
     _token = prefs.getString(_tokenKey);
     _initialized = true;
     notifyListeners();
+
+    // Only the token is persisted, so a driver who reopens the app is
+    // authenticated but has no profile until something asks for one. That used
+    // to be the profile screen alone; now the WhatsApp message signs off with
+    // the driver's name, so it has to be there from the first order they open.
+    //
+    // Deliberately not awaited: startup must not block on the network, and
+    // refreshProfile already swallows its own failures. Anything reading the
+    // name before this lands falls back to leaving it out.
+    if (isAuthenticated) {
+      unawaited(refreshProfile());
+    }
   }
 
   Future<void> login({required String email, required String password}) async {

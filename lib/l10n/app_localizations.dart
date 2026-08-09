@@ -113,6 +113,11 @@ class AppLocalizations {
   String get orderDetails => _t('orderDetails');
   String get noOrderSelected => _t('noOrderSelected');
   String get customerInformation => _t('customerInformation');
+  // Shown when the WhatsApp button is tapped on an order whose phone number is
+  // missing or unusable. This one follows the app's locale like every other
+  // string here — unlike the message sent TO the customer, which carries both
+  // languages at once (see lib/utils/whatsapp.dart).
+  String get noWhatsAppNumber => _t('noWhatsAppNumber');
   String get orderSummary => _t('orderSummary');
   // Heading of the note card carrying the instructions written on the order in
   // Shopify. Named for the reader's point of view — it is the note that came
@@ -256,6 +261,7 @@ class AppLocalizations {
     'orderDetails': 'Order Details',
     'noOrderSelected': 'No order selected',
     'customerInformation': 'Customer Information',
+    'noWhatsAppNumber': 'This customer has no valid WhatsApp number',
     'orderSummary': 'Order Summary',
     'customerNotes': 'Customer Notes',
     'driverNote': 'Driver Note',
@@ -380,6 +386,7 @@ class AppLocalizations {
     'orderDetails': 'تفاصيل الطلب',
     'noOrderSelected': 'لم يتم اختيار أي طلب',
     'customerInformation': 'معلومات العميل',
+    'noWhatsAppNumber': 'لا يوجد رقم واتساب صالح لهذا الزبون',
     'orderSummary': 'ملخص الطلب',
     'customerNotes': 'ملاحظات العميل',
     'driverNote': 'ملاحظة السائق',

@@ -1,9 +1,11 @@
 import 'package:delivery_boy_app/l10n/app_localizations.dart';
+import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/current_location_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:delivery_boy_app/utils/utils.dart';
+import 'package:delivery_boy_app/utils/whatsapp.dart';
 import 'package:delivery_boy_app/widgets/custom_button.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -77,12 +79,7 @@ class OrderDetailScreen extends StatelessWidget {
                         ),
                         SizedBox(width: 8),
                         GestureDetector(
-                          onTap: () => launchUrl(
-                            Uri.parse(
-                              'https://wa.me/${order.customerPhone.replaceAll(RegExp(r'[^0-9]'), '')}',
-                            ),
-                            mode: LaunchMode.externalApplication,
-                          ),
+                          onTap: () => _openWhatsApp(context, order),
                           child: CircleAvatar(
                             backgroundColor: const Color(0xFF25D366),
                             child: FaIcon(FontAwesomeIcons.whatsapp, color: Colors.white, size: 20),
@@ -358,6 +355,55 @@ class OrderDetailScreen extends StatelessWidget {
                 );
               },
             ),
+    );
+  }
+
+  // Opens WhatsApp on the customer's chat with the introduction already typed —
+  // who the driver is, which shop the order is from, what it costs, and a
+  // request for the customer's location. The driver reads it over and hits
+  // send: a wa.me link can only pre-fill the input box, never send by itself.
+  //
+  // The message goes out in English and Arabic together, because the driver has
+  // no way of knowing which one this customer reads.
+  Future<void> _openWhatsApp(BuildContext context, OrderModel order) async {
+    final l10n = context.l10n;
+    final messenger = ScaffoldMessenger.of(context);
+
+    // Free-form phone text from the Shopify checkout, so it needs normalising
+    // before wa.me will accept it — a Lebanese '03 719 871' has to become
+    // '9613719871'. Null means there is nothing dialable on the order.
+    final number = toWhatsAppNumber(order.customerPhone);
+    if (number == null) {
+      messenger.showSnackBar(SnackBar(content: Text(l10n.noWhatsAppNumber)));
+      return;
+    }
+
+    // The driver profile is fetched separately from the token and can still be
+    // in flight right after a cold start; the message drops the name rather
+    // than waiting on it.
+    final driver = context.read<AuthProvider>().driver;
+    final driverName =
+        (driver?['full_name'] ?? driver?['name'] ?? '').toString().trim();
+
+    final message = buildOrderWhatsAppMessage(
+      storeName: order.storeName,
+      // 'Customer' is the placeholder for an order that arrived without a name,
+      // and addressing someone as "Customer" reads worse than not naming them.
+      customerName: order.customerName == OrderModel.unknownCustomerName
+          ? ''
+          : order.customerName,
+      driverName: driverName,
+      orderNumber: order.orderNumber,
+      price: order.price,
+      isPrepaid: order.isPrepaid,
+    );
+
+    // No canLaunchUrl guard on purpose: the Android manifest declares <queries>
+    // only for tel: and navigation intents, so on Android 11+ the check would
+    // report false for this https link and swallow a tap that in fact works.
+    await launchUrl(
+      Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(message)}'),
+      mode: LaunchMode.externalApplication,
     );
   }
 
