@@ -24,6 +24,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 //   GET  /api/drivers/me/orders                    — active assigned orders
 //   GET  /api/drivers/me/orders/completed          — completed (delivered) orders
 //   POST /api/drivers/me/orders/:id/location       — GPS ping for customer tracking
+//   PATCH /api/drivers/me/orders/:id/note          — save the driver's own note
 //   GET  /api/maps/directions                      — route between two coordinates
 class ApiClient {
   static Uri _uri(String path) => Uri.parse('${ApiConfig.baseUrl}$path');
@@ -234,6 +235,37 @@ class ApiClient {
       message = _errorMessage(body);
     } catch (_) {}
     throw ApiException(message ?? 'Failed to update order status (HTTP ${res.statusCode})');
+  }
+
+  // Saves the driver's own note on one of their orders. An empty note clears
+  // whatever was there, which is how the driver deletes a note.
+  static Future<void> updateOrderNote({
+    required String token,
+    required String orderId,
+    required String note,
+  }) async {
+    http.Response res;
+    try {
+      res = await http.patch(
+        _uri('/api/drivers/me/orders/$orderId/note'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'note': note}),
+      );
+    } catch (e) {
+      throw ApiException('Network error: $e');
+    }
+
+    if (res.statusCode >= 200 && res.statusCode < 300) return;
+
+    String? message;
+    try {
+      final body = _decodeJson(res);
+      message = _errorMessage(body);
+    } catch (_) {}
+    throw ApiException(message ?? 'Failed to save note (HTTP ${res.statusCode})');
   }
 
   static Future<List<dynamic>> getMyOrders({required String token}) async {

@@ -125,55 +125,21 @@ class DeliveryProvider extends ChangeNotifier {
     required LatLng pickupLocation,
     required String pickupAddress,
   }) {
-    return OrderModel(
-      id: order.id,
-      customerName: order.customerName,
-      customerPhone: order.customerPhone,
-      item: order.item,
-      lineItems: order.lineItems,
-      note: order.note,
-      price: order.price,
+    return order.copyWith(
       pickupLocation: pickupLocation,
-      deliveryLocation: order.deliveryLocation,
       pickupAddress: pickupAddress,
-      deliveryAddress: order.deliveryAddress,
-      city: order.city,
-      area: order.area,
-      isPaid: order.isPaid,
-      isPrepaid: order.isPrepaid,
-      deliveredAt: order.deliveredAt,
     );
   }
 
   // Returns a copy of the given order with isPaid set to true.
   // This is used when the driver completes a COD delivery — at that moment
   // cash has been collected, so we flip the financial status to paid.
-  // Because OrderModel is immutable (every field is final), we cannot just
-  // write order.isPaid = true. Instead we must create a fresh instance that
-  // is identical in every way except isPaid, which is the standard immutable
-  // update pattern in Flutter/Dart.
+  //
+  // isPrepaid is deliberately left alone: it describes how the order arrived,
+  // so collecting the cash on delivery must not change it — that is exactly
+  // the distinction the earnings totals rely on.
   OrderModel _withPaid(OrderModel order) {
-    return OrderModel(
-      id: order.id,
-      customerName: order.customerName,
-      customerPhone: order.customerPhone,
-      item: order.item,
-      lineItems: order.lineItems,
-      note: order.note,
-      price: order.price,
-      pickupLocation: order.pickupLocation,
-      deliveryLocation: order.deliveryLocation,
-      pickupAddress: order.pickupAddress,
-      deliveryAddress: order.deliveryAddress,
-      city: order.city,
-      area: order.area,
-      isPaid: true,
-      // isPrepaid describes how the order arrived, so collecting the cash on
-      // delivery must not change it — that is exactly the distinction the
-      // earnings totals rely on.
-      isPrepaid: order.isPrepaid,
-      deliveredAt: order.deliveredAt,
-    );
+    return order.copyWith(isPaid: true);
   }
 
   // Fetches the list of assigned (non-delivered) orders for this driver
@@ -420,6 +386,54 @@ class DeliveryProvider extends ChangeNotifier {
     } catch (e) {
       rethrow; // caller shows error snackbar
     }
+  }
+
+  // Saves the driver's own note on the order that is open on the detail screen.
+  //
+  // The note is written to local state first so it appears the moment the
+  // driver saves it, then synced. A failed sync rethrows for the caller to
+  // surface, and the local copy is rolled back to what the backend still
+  // holds — a note that silently vanishes on the next refresh is worse than
+  // one that reports it did not save.
+  Future<void> saveDriverNote({
+    required String token,
+    required String note,
+  }) async {
+    final order = _currentOrder;
+    if (order == null) return;
+
+    final previous = order.driverNote;
+    final trimmed = note.trim();
+    if (trimmed == previous) return;
+
+    _applyDriverNote(order.id, trimmed);
+
+    try {
+      await ApiClient.updateOrderNote(
+        token: token,
+        orderId: order.id,
+        note: trimmed,
+      );
+    } catch (e) {
+      _applyDriverNote(order.id, previous);
+      rethrow; // caller shows error snackbar
+    }
+  }
+
+  // Writes a driver note into every copy of the order the provider holds: the
+  // one on screen and the one in the assigned list behind it, which is what
+  // the orders page rebuilds from.
+  void _applyDriverNote(String orderId, String note) {
+    if (_currentOrder?.id == orderId) {
+      _currentOrder = _currentOrder!.copyWith(driverNote: note);
+    }
+
+    final index = _orders.indexWhere((o) => o.id == orderId);
+    if (index != -1) {
+      _orders[index] = _orders[index].copyWith(driverNote: note);
+    }
+
+    notifyListeners();
   }
 
   // Updates UI immediately, then syncs RETURNED to the backend.

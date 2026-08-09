@@ -114,8 +114,19 @@ class AppLocalizations {
   String get noOrderSelected => _t('noOrderSelected');
   String get customerInformation => _t('customerInformation');
   String get orderSummary => _t('orderSummary');
-  // Heading of the note card: the instructions written on the order in Shopify.
-  String get orderNote => _t('orderNote');
+  // Heading of the note card carrying the instructions written on the order in
+  // Shopify. Named for the reader's point of view — it is the note that came
+  // with the order, as opposed to the one the driver writes below it.
+  String get customerNotes => _t('customerNotes');
+  // The driver's own note on the order, written and edited in the app.
+  String get driverNote => _t('driverNote');
+  String get addNote => _t('addNote');
+  String get editNote => _t('editNote');
+  String get noDriverNoteYet => _t('noDriverNoteYet');
+  String get driverNoteHint => _t('driverNoteHint');
+  String get save => _t('save');
+  String get noteSaved => _t('noteSaved');
+  String noteSaveFailed(String error) => '${_t('noteSaveFailed')}: $error';
   String get paid => _t('paid');
   String get unpaidCod => _t('unpaidCod');
   // Shown on orders the customer had already paid online: no cash is
@@ -246,7 +257,15 @@ class AppLocalizations {
     'noOrderSelected': 'No order selected',
     'customerInformation': 'Customer Information',
     'orderSummary': 'Order Summary',
-    'orderNote': 'Note',
+    'customerNotes': 'Customer Notes',
+    'driverNote': 'Driver Note',
+    'addNote': 'Add note',
+    'editNote': 'Edit',
+    'noDriverNoteYet': 'No note yet — tap to add one.',
+    'driverNoteHint': 'e.g. gate code, best time to call, where you left it',
+    'save': 'Save',
+    'noteSaved': 'Note saved',
+    'noteSaveFailed': 'Could not save note',
     'paid': 'Paid',
     'unpaidCod': 'Unpaid (COD)',
     'prepaid': 'Prepaid',
@@ -362,7 +381,15 @@ class AppLocalizations {
     'noOrderSelected': 'لم يتم اختيار أي طلب',
     'customerInformation': 'معلومات العميل',
     'orderSummary': 'ملخص الطلب',
-    'orderNote': 'ملاحظة',
+    'customerNotes': 'ملاحظات العميل',
+    'driverNote': 'ملاحظة السائق',
+    'addNote': 'إضافة ملاحظة',
+    'editNote': 'تعديل',
+    'noDriverNoteYet': 'لا توجد ملاحظة بعد — اضغط للإضافة.',
+    'driverNoteHint': 'مثال: رمز البوابة، أفضل وقت للاتصال، مكان تسليم الطلب',
+    'save': 'حفظ',
+    'noteSaved': 'تم حفظ الملاحظة',
+    'noteSaveFailed': 'تعذّر حفظ الملاحظة',
     'paid': 'مدفوع',
     'unpaidCod': 'غير مدفوع (الدفع عند الاستلام)',
     'prepaid': 'مدفوع مسبقاً',

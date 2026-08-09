@@ -218,60 +218,34 @@ class OrderDetailScreen extends StatelessWidget {
                 ),
               ),
             ),
-            // The order note, written on the order in the Shopify admin. It
-            // carries the things the address and the product list cannot say
-            // — "second floor, no lift", "call before arriving" — so it sits
-            // directly under the order summary rather than at the bottom of
-            // the screen. Orders without a note show nothing at all instead of
-            // an empty card.
+            // Two notes sit between the order and its destination, and they
+            // are deliberately not merged: the first came with the order and
+            // the driver cannot change it, the second belongs to the driver.
+            //
+            // The customer note is the Shopify order note — "second floor, no
+            // lift", "call before arriving". Orders without one show nothing
+            // rather than an empty card, since there is nothing to add to it
+            // from here.
             if (order.note.isNotEmpty) ...[
               SizedBox(height: 12),
-              Material(
-                color: const Color(0xFFFFF8E1),
-                borderRadius: BorderRadius.circular(20),
-                child: Padding(
-                  padding: EdgeInsets.all(20),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        Icons.sticky_note_2_outlined,
-                        color: const Color(0xFF8D6E00),
-                        size: 22,
-                      ),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              l10n.orderNote,
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                                color: const Color(0xFF8D6E00),
-                              ),
-                            ),
-                            SizedBox(height: 6),
-                            // Notes are free text a person typed, so the line
-                            // breaks they used are kept and the text wraps
-                            // instead of being cut off.
-                            Text(
-                              order.note,
-                              style: TextStyle(
-                                fontSize: 14,
-                                height: 1.4,
-                                color: Colors.black87,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              _NoteCard(
+                title: l10n.customerNotes,
+                body: order.note,
+                icon: Icons.sticky_note_2_outlined,
               ),
             ],
+            // The driver's own note always shows, empty or not — an invisible
+            // card would leave nowhere to tap to write the first one.
+            SizedBox(height: 12),
+            _NoteCard(
+              title: l10n.driverNote,
+              body: order.driverNote,
+              placeholder: l10n.noDriverNoteYet,
+              icon: Icons.edit_note,
+              actionLabel:
+                  order.driverNote.isEmpty ? l10n.addNote : l10n.editNote,
+              onEdit: () => _editDriverNote(context, order.driverNote),
+            ),
             SizedBox(height: 12),
             // Delivery location.
             // The pickup step used to sit above this one, showing "Current
@@ -387,6 +361,47 @@ class OrderDetailScreen extends StatelessWidget {
     );
   }
 
+  // Opens the note editor and saves what the driver typed. The sheet closes as
+  // soon as they tap Save; the note is already on screen by then because the
+  // provider writes it locally before syncing, so a slow network never holds
+  // up the driver.
+  Future<void> _editDriverNote(BuildContext context, String current) async {
+    final l10n = context.l10n;
+    final provider = context.read<DeliveryProvider>();
+    final token = context.read<AuthProvider>().token ?? '';
+    final messenger = ScaffoldMessenger.of(context);
+
+    final note = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true, // leaves room for the keyboard
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _DriverNoteSheet(initialNote: current),
+    );
+
+    // Dismissed without saving.
+    if (note == null) return;
+    if (note.trim() == current.trim()) return;
+
+    try {
+      await provider.saveDriverNote(token: token, note: note);
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.noteSaved)),
+      );
+    } catch (e) {
+      // saveDriverNote has already put the old note back, so the card the
+      // driver is looking at matches what the backend holds.
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(l10n.noteSaveFailed('$e')),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   // Starts the delivery: stamps the driver's current position as the pickup
   // point and kicks off background GPS sharing for this order. The screen
   // stays where it is — only the buttons at the bottom change.
@@ -458,5 +473,190 @@ class OrderDetailScreen extends StatelessWidget {
         ),
       );
     }
+  }
+}
+
+// One note card. Used for both notes on this screen so the two read as a pair:
+// same shape, same warm background, differing only in whether they can be
+// edited. Without onEdit it is a plain read-only card.
+class _NoteCard extends StatelessWidget {
+  const _NoteCard({
+    required this.title,
+    required this.body,
+    required this.icon,
+    this.placeholder,
+    this.actionLabel,
+    this.onEdit,
+  });
+
+  final String title;
+  final String body;
+  final IconData icon;
+
+  // Shown in place of the body when there is no note yet. Only meaningful on
+  // an editable card — a read-only one with nothing to say is not built at all.
+  final String? placeholder;
+  final String? actionLabel;
+  final VoidCallback? onEdit;
+
+  static const Color _accent = Color(0xFF8D6E00);
+  static const Color _background = Color(0xFFFFF8E1);
+
+  @override
+  Widget build(BuildContext context) {
+    final isEmpty = body.isEmpty;
+
+    return Material(
+      color: _background,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        onTap: onEdit,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: _accent, size: 22),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                              color: _accent,
+                            ),
+                          ),
+                        ),
+                        if (onEdit != null && actionLabel != null)
+                          Text(
+                            actionLabel!,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: _accent,
+                              decoration: TextDecoration.underline,
+                              decorationColor: _accent,
+                            ),
+                          ),
+                      ],
+                    ),
+                    SizedBox(height: 6),
+                    // Notes are free text a person typed, so the line breaks
+                    // they used are kept and the text wraps instead of being
+                    // cut off.
+                    Text(
+                      isEmpty ? (placeholder ?? '') : body,
+                      style: TextStyle(
+                        fontSize: 14,
+                        height: 1.4,
+                        color: isEmpty ? Colors.black45 : Colors.black87,
+                        fontStyle: isEmpty ? FontStyle.italic : FontStyle.normal,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// The note editor. A bottom sheet rather than a dialog so the field stays
+// above the keyboard on a phone, and stateful so the text field keeps its
+// controller across the rebuilds the keyboard causes.
+//
+// Pops with the typed text on save, and with null when dismissed, which is how
+// the caller tells "saved an empty note" (the driver clearing it) apart from
+// "changed their mind".
+class _DriverNoteSheet extends StatefulWidget {
+  const _DriverNoteSheet({required this.initialNote});
+
+  final String initialNote;
+
+  @override
+  State<_DriverNoteSheet> createState() => _DriverNoteSheetState();
+}
+
+class _DriverNoteSheetState extends State<_DriverNoteSheet> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initialNote);
+
+  // Matches MAX_DRIVER_NOTE_LENGTH in the backend's driverSelfController, which
+  // rejects anything longer. Enforcing it here too means the driver is stopped
+  // while typing rather than losing the note to an error on save.
+  static const int _maxLength = 2000;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+
+    return Padding(
+      // Lifts the sheet clear of the keyboard.
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l10n.driverNote,
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+          ),
+          SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            maxLines: 5,
+            minLines: 3,
+            maxLength: _maxLength,
+            textCapitalization: TextCapitalization.sentences,
+            keyboardType: TextInputType.multiline,
+            decoration: InputDecoration(
+              hintText: l10n.driverNoteHint,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+          SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(l10n.cancel),
+              ),
+              SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: () =>
+                    Navigator.of(context).pop(_controller.text.trim()),
+                child: Text(l10n.save),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
