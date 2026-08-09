@@ -39,10 +39,30 @@ class OrderLineItem {
 }
 
 class OrderModel {
+  // Stands in for a customer whose order carries no name at all. Kept as a
+  // constant rather than a bare literal because it is a placeholder, not a
+  // name, and anything addressing the customer directly — the WhatsApp
+  // message — has to recognise it and greet them without it.
+  static const String unknownCustomerName = 'Customer';
+
   final String id;
   final String customerName;
   final String customerPhone;
   final String item;
+
+  // The order number on its own — '2672', no '#' and no 'Order' in front of it.
+  // `item` above is the display label built from this ('Order #2672') and reads
+  // wrong mid-sentence, which is what the WhatsApp message needs. Empty for an
+  // order the backend sent with neither an order_number nor a shopify_order_id.
+  final String orderNumber;
+
+  // Which shop this order belongs to, for the driver's message to the customer:
+  // several stores share one delivery app, so "your order" on its own leaves
+  // the customer guessing who is at the door. Comes from the stores table via
+  // the driver order endpoints; empty against a backend that does not send it
+  // yet, and the message then simply omits the shop.
+  final String storeName;
+
   final int price;
 
   // The products in this order. Empty for orders imported before the backend
@@ -109,6 +129,8 @@ class OrderModel {
     required this.deliveryLocation,
     required this.pickupAddress,
     required this.deliveryAddress,
+    this.orderNumber = '',
+    this.storeName = '',
     this.lineItems = const [],
     this.note = '',
     this.driverNote = '',
@@ -134,6 +156,8 @@ class OrderModel {
       customerName: customerName,
       customerPhone: customerPhone,
       item: item,
+      orderNumber: orderNumber,
+      storeName: storeName,
       price: price,
       lineItems: lineItems,
       note: note,
@@ -225,9 +249,12 @@ class OrderModel {
 
     return OrderModel(
       id: id == null ? '' : id.toString(),
-      customerName: customerName.isNotEmpty ? customerName : 'Customer',
+      customerName:
+          customerName.isNotEmpty ? customerName : unknownCustomerName,
       customerPhone: (json['customer_phone'] ?? '').toString(),
       item: orderNumber == null ? 'Order' : 'Order #$orderNumber',
+      orderNumber: orderNumber ?? '',
+      storeName: _parseStoreName(json),
       lineItems: _parseLineItems(json['line_items']),
       // Null for orders from a backend without the note column, and for the
       // many orders that simply have no note.
@@ -248,6 +275,24 @@ class OrderModel {
       isPrepaid: isPrepaid,
       deliveredAt: deliveredAt,
     );
+  }
+
+  // The shop this order came from, as the customer would recognise it.
+  //
+  // store_name is what the merchant calls themselves in Shopify, but the column
+  // is nullable — a store installed before the backend started recording it has
+  // none. The shop domain is the next best thing, minus the '.myshopify.com'
+  // that would only confuse a customer; the backend uses the same fallback when
+  // it greets a store admin. Empty when the backend sends neither, which is the
+  // case for any release predating the store join on the driver endpoints.
+  static String _parseStoreName(Map<String, dynamic> json) {
+    final storeName = (json['store_name'] ?? '').toString().trim();
+    if (storeName.isNotEmpty) return storeName;
+
+    final shopDomain = (json['shop_domain'] ?? '').toString().trim();
+    if (shopDomain.isEmpty) return '';
+
+    return shopDomain.replaceFirst(RegExp(r'\.myshopify\.com$'), '');
   }
 
   // Reads the backend's line_items column. Postgres JSONB normally arrives
