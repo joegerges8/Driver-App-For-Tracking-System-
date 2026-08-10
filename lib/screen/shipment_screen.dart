@@ -3,6 +3,7 @@ import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
+import 'package:delivery_boy_app/widgets/driver_pay_row.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -277,52 +278,67 @@ class _EarningsCard extends StatelessWidget {
                 ),
               ],
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
+            child: Column(
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      context.l10n.totalEarned,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                      ),
-                    ),
-                    Text(
-                      '\$$total',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        height: 1.1,
-                      ),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                Column(
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
-                      context.l10n.deliveries,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                      ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          context.l10n.totalEarned,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                        Text(
+                          '\$$total',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                            height: 1.1,
+                          ),
+                        ),
+                      ],
                     ),
-                    Text(
-                      '$count',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                        height: 1.1,
-                      ),
+                    const Spacer(),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          context.l10n.deliveries,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                        Text(
+                          '$count',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            height: 1.1,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
+
+                // ── The driver's own pay ────────────────────────────────
+                // Sits under the collected total, on the same red stripe,
+                // because the two answer different questions: what is in the
+                // driver's pocket for the store, and what the store owes the
+                // driver for carrying it. Follows the period toggle below, so
+                // Week shows the fees earned this week.
+                const SizedBox(height: 14),
+                const Divider(color: Colors.white24, height: 1, thickness: 1),
+                const SizedBox(height: 12),
+                DriverPayRow(count: count),
               ],
             ),
           ),
@@ -566,8 +582,9 @@ class _SkeletonList extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
       children: [
-        // Earnings card skeleton
-        _SkeletonBox(height: 140, radius: 16),
+        // Earnings card skeleton — tall enough for the collected total, the
+        // driver's own pay under it, and the period toggle.
+        _SkeletonBox(height: 200, radius: 16),
         const SizedBox(height: 24),
         _SkeletonBox(height: 18, width: 120),
         const SizedBox(height: 12),

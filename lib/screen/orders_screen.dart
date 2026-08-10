@@ -26,6 +26,7 @@ import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/route.dart';
 import 'package:delivery_boy_app/screen/order_detail_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
+import 'package:delivery_boy_app/widgets/driver_pay_row.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -95,7 +96,15 @@ class _OrdersScreenState extends State<OrdersScreen>
     if (token == null || token.isEmpty) return;
     if (_lastFetchToken == token) return;
     _lastFetchToken = token;
-    context.read<DeliveryProvider>().refreshMyOrders(token: token);
+    final delivery = context.read<DeliveryProvider>();
+    delivery.refreshMyOrders(token: token);
+
+    // The banner above the tabs reports Completed and Your Earnings out of the
+    // completed list, which otherwise only loads when the Done tab is opened —
+    // so a driver who never opened that tab read $0 for work they had done.
+    // Silent, so the Done tab keeps ownership of its own skeleton and error
+    // states and this fetch cannot flash either of them on arrival.
+    delivery.refreshCompletedOrders(token: token, silent: true);
   }
 
   @override
@@ -319,6 +328,9 @@ class _OrdersScreenState extends State<OrdersScreen>
 //     so including it would count the same payment twice.
 //   - Completed:    how many orders have been marked as delivered.
 //   - "In Progress" pill: shown only when a delivery is currently active.
+//   - Your Earnings: the delivery fees the store owes the driver — a flat
+//     amount per completed order, prepaid ones included, since the fee is for
+//     making the delivery and not for carrying the cash.
 //
 // The values are derived from completedOrders (fetched from the Done tab
 // endpoint), so the strip accurately reflects real delivered orders rather
@@ -352,40 +364,61 @@ class _EarningsSummaryStrip extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
+      child: Column(
         children: [
-          _StatColumn(label: context.l10n.totalEarned, value: '\$$total'),
-          const Spacer(),
-          _StatColumn(
-            label: context.l10n.completed,
-            value: '${completedOrders.length}',
-          ),
-          // The "In Progress" pill is conditionally shown only when the driver
-          // has accepted an order and is currently on the way.
-          if (isActive) ...[
-            const SizedBox(width: 16),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: Colors.white24,
-                borderRadius: BorderRadius.circular(20),
+          Row(
+            children: [
+              _StatColumn(label: context.l10n.totalEarned, value: '\$$total'),
+              const Spacer(),
+              _StatColumn(
+                label: context.l10n.completed,
+                value: '${completedOrders.length}',
               ),
-              child: Row(
-                children: [
-                  const Icon(Icons.local_shipping, color: Colors.white, size: 13),
-                  const SizedBox(width: 4),
-                  Text(
-                    context.l10n.inProgress,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
+              // The "In Progress" pill is conditionally shown only when the
+              // driver has accepted an order and is currently on the way.
+              if (isActive) ...[
+                const SizedBox(width: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
                   ),
-                ],
-              ),
-            ),
-          ],
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.local_shipping,
+                        color: Colors.white,
+                        size: 13,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        context.l10n.inProgress,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+
+          // What the store owes the driver for those deliveries, under the
+          // cash they collected for the store. Counts every completed order
+          // rather than the area-filtered ones, matching the Completed figure
+          // it sits under — the Shipment tab is where the driver breaks the
+          // same total down by day, week or month.
+          const SizedBox(height: 12),
+          const Divider(color: Colors.white24, height: 1, thickness: 1),
+          const SizedBox(height: 10),
+          DriverPayRow(count: completedOrders.length),
         ],
       ),
     );
