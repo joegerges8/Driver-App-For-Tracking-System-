@@ -5,6 +5,7 @@ import 'package:delivery_boy_app/screen/profile_screen.dart';
 import 'package:delivery_boy_app/screen/shipment_screen.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
+import 'package:delivery_boy_app/services/background_location_service.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -92,6 +93,14 @@ class _AppMainScreenState extends State<AppMainScreen>
     final token = context.read<AuthProvider>().token;
     if (token == null || token.isEmpty) return;
     context.read<DeliveryProvider>().startAutoRefresh(token: token);
+
+    // The polling above only runs while this screen is on the driver's phone
+    // screen, which is exactly when nothing important is being missed. The
+    // shift service is the half that keeps watching after they put the phone
+    // away: it is what notices the dispatcher marking an order PICKED_UP and
+    // starts sharing location for it. Starting it here covers logging in and
+    // reopening the app alike, and it is a no-op if it is already running.
+    BackgroundLocationService.startShift();
   }
 
   @override

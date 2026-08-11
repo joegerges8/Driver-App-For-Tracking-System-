@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:delivery_boy_app/services/api_config.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
@@ -23,7 +24,28 @@ const _orderIdsKey = 'bg_active_order_ids';
 // going dark, then cleared.
 const _legacyOrderIdKey = 'bg_active_order_id';
 
-const _baseUrl = 'https://dispatcher-dashboard.up.railway.app';
+// The backend's own view of this driver's work, refreshed by the service on
+// its own timer so it holds true with the app closed.
+//
+//   _backendOnRoadKey — orders the backend says are on the road (PICKED_UP or
+//                       OUT_FOR_DELIVERY). The dispatcher flipping an order to
+//                       PICKED_UP from the dashboard shows up here, and that
+//                       is what starts this driver sharing location without
+//                       them tapping anything.
+//   _backendOpenKey   — every order still assigned to the driver and not
+//                       finished. Anything absent from it has been delivered,
+//                       returned, cancelled or taken away, and must stop being
+//                       pinged for even if this phone started it.
+const _backendOnRoadKey = 'bg_backend_on_road_ids';
+const _backendOpenKey = 'bg_backend_open_ids';
+
+// Order statuses that mean the driver is carrying this order right now.
+const _onRoadStatuses = {'PICKED_UP', 'OUT_FOR_DELIVERY'};
+
+// Shared with the rest of the app so a --dart-define pointing at a staging
+// backend reaches the background isolate too, instead of it quietly carrying
+// on posting to production.
+String get _baseUrl => ApiConfig.baseUrl;
 
 // The foreground-service notification, cut down to the least Android will
 // accept. GPS that survives the app being backgrounded or force-killed has to
@@ -59,6 +81,31 @@ Future<List<String>> _readActiveOrderIds(SharedPreferences prefs) async {
   return const [];
 }
 
+/// Which orders should be receiving GPS right now.
+///
+/// Two things can put an order on the road, and either is enough:
+///   - the driver tapped "Start Delivery" on this phone, or
+///   - the dispatcher marked it PICKED_UP on the dashboard.
+///
+/// One thing takes it off, and it overrules both: the backend no longer
+/// listing it as open. That is what stops a delivered or returned order from
+/// pinning the driver to the map — this phone's memory of having started it is
+/// not evidence that it is still going.
+///
+/// The backend's list is only applied once it has actually been fetched. Until
+/// then — first run, or offline since launch — a locally started delivery
+/// keeps streaming rather than being second-guessed by a list we do not have.
+Future<List<String>> _resolveTrackedOrderIds(SharedPreferences prefs) async {
+  final started = await _readActiveOrderIds(prefs);
+  final onRoad = prefs.getStringList(_backendOnRoadKey) ?? const [];
+  final open = prefs.getStringList(_backendOpenKey);
+
+  final wanted = <String>{...started, ...onRoad};
+  if (open == null) return wanted.toList();
+
+  return wanted.where(open.contains).toList();
+}
+
 class BackgroundLocationService {
   static final _svc = FlutterBackgroundService();
 
@@ -82,6 +129,25 @@ class BackgroundLocationService {
     );
   }
 
+  /// Starts the service for a driver who is logged in, whether or not they
+  /// have anything to deliver yet.
+  ///
+  /// This is what makes "the dispatcher marks it PICKED_UP and the driver
+  /// starts being tracked" work at all. The service used to run only while an
+  /// order was in progress, which meant something had to already be happening
+  /// before the app could notice that something had begun — and with the app
+  /// in the driver's pocket, nothing was watching. Now the service is what
+  /// watches: while idle it costs one small request every half minute and
+  /// touches the GPS not at all, and it turns location on by itself the moment
+  /// the backend says an order is on the road.
+  ///
+  /// Safe to call on every app start and resume; it does nothing if the
+  /// service is already running.
+  static Future<void> startShift() async {
+    final isRunning = await _svc.isRunning();
+    if (!isRunning) await _svc.startService();
+  }
+
   /// Adds an order to the tracked set and starts the service if it is not
   /// already running. Safe to call multiple times for the same order.
   static Future<void> startTracking(String orderId) async {
@@ -97,27 +163,62 @@ class BackgroundLocationService {
     if (!isRunning) await _svc.startService();
   }
 
-  /// Removes a single order from the tracked set, leaving the driver's other
-  /// deliveries streaming. Stops the service entirely once the last one is done.
-  static Future<void> stopTrackingOrder(String orderId) async {
+  /// Hands the app's freshly fetched order list to the service.
+  ///
+  /// The service polls for this itself, but the app in the foreground has
+  /// often just asked the same question — passing the answer along means a
+  /// dispatcher's PICKED_UP takes effect on the next tick rather than waiting
+  /// for the service to get round to asking too.
+  static Future<void> publishBackendOrders({
+    required Iterable<String> openOrderIds,
+    required Iterable<String> onRoadOrderIds,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
-    final ids = await _readActiveOrderIds(prefs);
-    final remaining = ids.where((id) => id != orderId).toList();
-
-    if (remaining.isEmpty) {
-      await stopTracking();
-      return;
-    }
-
-    await prefs.setStringList(_orderIdsKey, remaining);
+    await prefs.setStringList(_backendOpenKey, openOrderIds.toList());
+    await prefs.setStringList(_backendOnRoadKey, onRoadOrderIds.toList());
   }
 
-  /// Stops tracking every order. Clears the stored ids so the background
-  /// isolate stops itself on its next tick, and signals it via stopService.
+  /// Removes a single order from the tracked set, leaving the driver's other
+  /// deliveries streaming.
+  ///
+  /// This no longer stops the service when the last order finishes. The
+  /// service is the driver's shift now, not one delivery: finishing everything
+  /// on the list means it goes quiet and stops touching the GPS, but it stays
+  /// listening for the next order the dispatcher sends. Logging out is what
+  /// ends it.
+  ///
+  /// The order is struck off the backend's on-road list as well as this
+  /// phone's. Marking a delivery done here is the most recent word on it, and
+  /// without this the pings would carry on for the half-minute or so until the
+  /// next refresh caught up with what the driver already knows.
+  static Future<void> stopTrackingOrder(String orderId) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final started = await _readActiveOrderIds(prefs);
+    await prefs.setStringList(
+      _orderIdsKey,
+      started.where((id) => id != orderId).toList(),
+    );
+
+    final onRoad = prefs.getStringList(_backendOnRoadKey);
+    if (onRoad != null) {
+      await prefs.setStringList(
+        _backendOnRoadKey,
+        onRoad.where((id) => id != orderId).toList(),
+      );
+    }
+  }
+
+  /// Stops tracking every order and ends the shift. Clears everything the
+  /// service decides from — including the backend's view, which would
+  /// otherwise start the next driver to log in on this phone straight into
+  /// the previous one's deliveries — and signals the isolate to stop.
   static Future<void> stopTracking() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_orderIdsKey);
     await prefs.remove(_legacyOrderIdKey);
+    await prefs.remove(_backendOnRoadKey);
+    await prefs.remove(_backendOpenKey);
     _svc.invoke('stopService');
   }
 
@@ -126,6 +227,14 @@ class BackgroundLocationService {
   static Future<List<String>> activeOrderIds() async {
     final prefs = await SharedPreferences.getInstance();
     return _readActiveOrderIds(prefs);
+  }
+
+  /// The orders whose GPS is actually flowing right now — this phone's started
+  /// deliveries and the dispatcher's, minus anything the backend has closed.
+  /// See [_resolveTrackedOrderIds] for the rule.
+  static Future<List<String>> trackedOrderIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    return _resolveTrackedOrderIds(prefs);
   }
 
   static Future<bool> isRunning() => _svc.isRunning();
@@ -155,19 +264,35 @@ void _onStart(ServiceInstance service) async {
     );
   }
 
-  // Post GPS to the backend every 15 seconds.
-  // Using a timer (instead of a stream) is more reliable in background isolates.
+  // Ticks every 15 seconds. Using a timer (instead of a stream) is more
+  // reliable in background isolates.
+  //
+  // Two jobs, on different clocks: ask the backend what this driver is
+  // carrying (every other tick, ~30s — it is a small request and the answer
+  // changes at human speed), and post GPS for whatever that turns out to be
+  // (every tick, but only while there is something to post it for).
+  var tick = 0;
+
   Timer.periodic(const Duration(seconds: 15), (_) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.reload(); // pick up ids written by the UI isolate
     final token = prefs.getString(_tokenKey);
-    final orderIds = await _readActiveOrderIds(prefs);
 
-    // Stop if every order is done or the driver logged out
-    if (token == null || orderIds.isEmpty) {
+    // Logging out is the only thing that ends the shift. Having nothing to
+    // deliver does not: an idle driver is exactly who needs someone still
+    // listening for the dispatcher to hand them a job.
+    if (token == null) {
       service.stopSelf();
       return;
     }
+
+    if (tick % 2 == 0) await _refreshBackendOrders(prefs, token);
+    tick++;
+
+    final orderIds = await _resolveTrackedOrderIds(prefs);
+
+    // Nothing on the road: no GPS fix, no requests, nothing but the wait.
+    if (orderIds.isEmpty) return;
 
     try {
       final position = await Geolocator.getCurrentPosition(
@@ -196,24 +321,74 @@ void _onStart(ServiceInstance service) async {
 
       // A 404 means the backend no longer has that order for this driver: the
       // dispatcher deleted it or reassigned it. Nothing will ever accept its
-      // pings again, so drop it here — otherwise a deleted order kept the
-      // foreground notification and the GPS radio alive indefinitely.
+      // pings again, so drop it here — otherwise a deleted order kept the GPS
+      // radio alive indefinitely.
+      //
+      // Only this phone's own "I started this" list is edited. The backend's
+      // two lists are its to write, and the next refresh will have dropped the
+      // order from them anyway. The service itself keeps running: the driver
+      // is still on shift, they have just lost one job.
       final gone = <String>{};
       for (var i = 0; i < orderIds.length; i++) {
         if (responses[i].statusCode == 404) gone.add(orderIds[i]);
       }
 
       if (gone.isNotEmpty) {
-        final remaining =
-            orderIds.where((id) => !gone.contains(id)).toList();
-        await prefs.setStringList(_orderIdsKey, remaining);
-        if (remaining.isEmpty) {
-          service.stopSelf();
-          return;
-        }
+        final started = await _readActiveOrderIds(prefs);
+        await prefs.setStringList(
+          _orderIdsKey,
+          started.where((id) => !gone.contains(id)).toList(),
+        );
       }
     } catch (_) {
       // Silent — a missed ping is acceptable
     }
   });
+}
+
+// Asks the backend what this driver is carrying and records the answer for
+// _resolveTrackedOrderIds to act on.
+//
+// A failed request deliberately writes nothing. The stored lists are what
+// decide whether GPS flows, and treating a dropped connection as "no orders"
+// would cut a delivery's tracking dead every time the driver went through a
+// tunnel. Stale is the safe direction here: keep pinging what we last knew
+// about, and correct it when the network comes back.
+Future<void> _refreshBackendOrders(
+  SharedPreferences prefs,
+  String token,
+) async {
+  try {
+    final response = await http.get(
+      Uri.parse('$_baseUrl/api/drivers/me/orders'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+
+    if (response.statusCode != 200) return;
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) return;
+
+    final open = <String>[];
+    final onRoad = <String>[];
+
+    for (final item in decoded) {
+      if (item is! Map) continue;
+      final id = item['id']?.toString();
+      if (id == null || id.isEmpty) continue;
+
+      // The endpoint only returns orders that are still the driver's problem —
+      // delivered, returned and cancelled ones are already filtered out server
+      // side — so everything here is open by definition.
+      open.add(id);
+
+      final status = (item['order_status'] ?? '').toString().toUpperCase();
+      if (_onRoadStatuses.contains(status)) onRoad.add(id);
+    }
+
+    await prefs.setStringList(_backendOpenKey, open);
+    await prefs.setStringList(_backendOnRoadKey, onRoad);
+  } catch (_) {
+    // Offline or a bad response — keep the last known lists.
+  }
 }
