@@ -300,9 +300,6 @@ void _onStart(ServiceInstance service) async {
 
     final orderIds = await _resolveTrackedOrderIds(prefs);
 
-    // Nothing on the road: no GPS fix, no requests, nothing but the wait.
-    if (orderIds.isEmpty) return;
-
     try {
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
@@ -310,8 +307,22 @@ void _onStart(ServiceInstance service) async {
         ),
       );
 
-      // One GPS read, fanned out to every active order. The driver has a single
-      // position; each order simply records it against its own tracking token.
+      // One GPS read, reported to two different audiences.
+      //
+      // The dispatcher gets it unconditionally, order or no order: their map
+      // exists to answer "who is out there", and a driver waiting at the shop
+      // with nothing assigned is precisely who they are looking for when the
+      // next order lands. This is why the fix is read even when the order list
+      // below is empty.
+      await _postDriverLocation(token, position);
+
+      // The customer gets it only through the orders actually under way —
+      // unchanged, and deliberately so. A tracking page must never show a
+      // driver moving around before their delivery has started.
+      if (orderIds.isEmpty) return;
+
+      // One position, fanned out to every active order. Each order simply
+      // records it against its own tracking token.
       final responses = await Future.wait(
         orderIds.map(
           (orderId) => http.post(
@@ -353,6 +364,27 @@ void _onStart(ServiceInstance service) async {
       // Silent — a missed ping is acceptable
     }
   });
+}
+
+// Reports where the driver is to the dispatcher's live map, with no order
+// attached. Best-effort: a failed post costs one dot on a dashboard, and must
+// never take down the per-order pings that a waiting customer is watching.
+Future<void> _postDriverLocation(String token, Position position) async {
+  try {
+    await http.post(
+      Uri.parse('$_baseUrl/api/drivers/me/location'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+      }),
+    );
+  } catch (_) {
+    // Silent — a missed dispatcher update is acceptable.
+  }
 }
 
 // Asks the backend what this driver is carrying and records the answer for
