@@ -18,6 +18,8 @@
 //  7. Area filter   — chips above the tabs narrow every tab to one delivery
 //                     area (Beirut, Metn, Keserwan, ...). Replaced an earlier
 //                     per-city filter; see _AreaFilterBar for why.
+//  8. Order search  — a field above the tabs that finds one order by its
+//                     number, typed without the '#'. See _OrderSearchField.
 
 import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/models/order_model.dart';
@@ -26,6 +28,7 @@ import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/route.dart';
 import 'package:delivery_boy_app/screen/order_detail_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
+import 'package:delivery_boy_app/utils/order_search.dart';
 import 'package:delivery_boy_app/widgets/driver_pay_row.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -52,6 +55,12 @@ class _OrdersScreenState extends State<OrdersScreen>
   // Controls the four tabs: All, Pending, Active, Done.
   late TabController _tabController;
 
+  // What the driver has typed into the order-number search field, exactly as
+  // typed. Normalising happens at comparison time so the field itself never
+  // rewrites what someone is in the middle of typing.
+  final TextEditingController _searchController = TextEditingController();
+  String _searchText = '';
+
   @override
   void initState() {
     super.initState();
@@ -71,6 +80,7 @@ class _OrdersScreenState extends State<OrdersScreen>
     // Always remove listeners and dispose controllers to prevent memory leaks.
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -163,6 +173,31 @@ class _OrdersScreenState extends State<OrdersScreen>
     return orders.where((o) => o.area == selected).toList();
   }
 
+  // The search as it will actually be compared — '#', spaces and case removed.
+  // Empty when the field is empty or holds only punctuation, which every reader
+  // below treats as "no search running".
+  String get _query => normalizeOrderQuery(_searchText);
+
+  bool get _isSearching => _query.isNotEmpty;
+
+  // What a tab shows: the searched order, or the area-filtered list.
+  //
+  // A search deliberately ignores the area chips. Looking up a number is not
+  // browsing — the driver has one specific order in mind, usually because a
+  // customer is on the phone about it — and silently hiding it because a chip
+  // from ten minutes ago points at another area would look exactly like the
+  // order not existing. The chip bar hides itself while a search is running so
+  // the two filters are never shown as if they were both in force.
+  List<OrderModel> _visible(List<OrderModel> orders) {
+    if (_isSearching) {
+      return orders
+          .where((o) => orderNumberMatches(o.orderNumber, _query))
+          .toList();
+    }
+
+    return _filterByArea(orders);
+  }
+
   @override
   Widget build(BuildContext context) {
     // context.watch rebuilds this widget automatically whenever DeliveryProvider
@@ -198,32 +233,47 @@ class _OrdersScreenState extends State<OrdersScreen>
           indicatorWeight: 3,
           isScrollable: true,
           tabAlignment: TabAlignment.start,
+          // The counts follow the search as well as the area filter, so a
+          // driver searching 2693 reads which tab the order is sitting in
+          // instead of having to open all four looking for it.
           tabs: [
-            Tab(text: l10n.tabAll(_filterByArea(delivery.orders).length)),
-            Tab(text: l10n.tabPending(_filterByArea(pendingOrders).length)),
+            Tab(text: l10n.tabAll(_visible(delivery.orders).length)),
+            Tab(text: l10n.tabPending(_visible(pendingOrders).length)),
             Tab(
               text: l10n.tabReturned(
-                _filterByArea(delivery.returnedOrders).length,
+                _visible(delivery.returnedOrders).length,
               ),
             ),
             Tab(
               text: l10n.tabCompleted(
-                _filterByArea(delivery.completedOrders).length,
+                _visible(delivery.completedOrders).length,
               ),
             ),
           ],
         ),
       ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          final token = context.read<AuthProvider>().token;
-          if (token != null && token.isNotEmpty) {
-            await context.read<DeliveryProvider>().refreshMyOrders(
-              token: token,
-            );
-          }
-        },
-        child: _buildBody(context, delivery, pendingOrders, isActive),
+      // The search field sits outside the RefreshIndicator so it stays put
+      // while the list below it is loading, erroring or being pulled down.
+      body: Column(
+        children: [
+          _OrderSearchField(
+            controller: _searchController,
+            onChanged: (text) => setState(() => _searchText = text),
+          ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: () async {
+                final token = context.read<AuthProvider>().token;
+                if (token != null && token.isNotEmpty) {
+                  await context.read<DeliveryProvider>().refreshMyOrders(
+                    token: token,
+                  );
+                }
+              },
+              child: _buildBody(context, delivery, pendingOrders, isActive),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -269,6 +319,12 @@ class _OrdersScreenState extends State<OrdersScreen>
       delivery.completedOrders,
     ]);
 
+    // While a search is running the tabs show whatever matched the number, so
+    // the empty state says so rather than claiming the driver has no orders.
+    String emptyMessage(String whenBrowsing) =>
+        _isSearching ? l10n.noOrderMatching(_query) : whenBrowsing;
+    final String? emptyHint = _isSearching ? l10n.tryOtherTabs : null;
+
     // Main layout: earnings strip, area filter, then the four tab views.
     return Column(
       children: [
@@ -276,7 +332,8 @@ class _OrdersScreenState extends State<OrdersScreen>
           completedOrders: delivery.completedOrders,
           isActive: isActive,
         ),
-        if (areas.isNotEmpty)
+        // Hidden during a search, which ignores the area filter — see _visible.
+        if (areas.isNotEmpty && !_isSearching)
           _AreaFilterBar(
             areas: areas,
             selectedArea: _selectedArea,
@@ -294,23 +351,28 @@ class _OrdersScreenState extends State<OrdersScreen>
             children: [
               // All tab — every assigned order.
               _OrderList(
-                orders: _filterByArea(delivery.orders),
-                emptyMessage: l10n.noOrdersAssigned,
+                orders: _visible(delivery.orders),
+                emptyMessage: emptyMessage(l10n.noOrdersAssigned),
+                emptyHint: emptyHint,
               ),
               // Pending tab — orders not started yet.
               _OrderList(
-                orders: _filterByArea(pendingOrders),
-                emptyMessage: l10n.noPendingOrders,
+                orders: _visible(pendingOrders),
+                emptyMessage: emptyMessage(l10n.noPendingOrders),
+                emptyHint: emptyHint,
               ),
               // Returned tab — orders the driver marked as returned.
               _OrderList(
-                orders: _filterByArea(delivery.returnedOrders),
-                emptyMessage: l10n.noReturnedOrders,
+                orders: _visible(delivery.returnedOrders),
+                emptyMessage: emptyMessage(l10n.noReturnedOrders),
+                emptyHint: emptyHint,
               ),
               // Done tab — read-only cards for completed deliveries.
               _CompletedOrderList(
-                orders: _filterByArea(delivery.completedOrders),
+                orders: _visible(delivery.completedOrders),
                 delivery: delivery,
+                emptyMessage: emptyMessage(l10n.noDeliveriesToday),
+                emptyHint: emptyHint,
               ),
             ],
           ),
@@ -455,6 +517,78 @@ class _StatColumn extends StatelessWidget {
   }
 }
 
+// ──────────────────────── Order Search Field ──────────────────────────────
+//
+// Finds one order by its number. A driver on the phone with a customer is told
+// "order 2693" and types exactly that: no '#', no "order", no case to get
+// right — orderNumberMatches strips all of it before comparing.
+//
+// The keyboard is the numeric one because every order number in the list is a
+// number, and a driver holding a phone in one hand at a gate should not have to
+// hunt for digits on a letter keyboard. Nothing is lost for a store whose
+// numbers carry a prefix ('EN2693'): matching is on any part of the number, so
+// the digits alone still find it.
+
+class _OrderSearchField extends StatelessWidget {
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  const _OrderSearchField({required this.controller, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasText = controller.text.isNotEmpty;
+
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        keyboardType: TextInputType.number,
+        textInputAction: TextInputAction.search,
+        style: const TextStyle(fontSize: 14),
+        decoration: InputDecoration(
+          hintText: context.l10n.searchOrderNumber,
+          hintStyle: const TextStyle(color: Colors.black38, fontSize: 14),
+          prefixIcon: const Icon(Icons.search, size: 20, color: Colors.black45),
+          // Clearing is one tap, so a driver who searched an order and now
+          // wants their list back is never left deleting digits.
+          suffixIcon: hasText
+              ? IconButton(
+                  icon: const Icon(Icons.close, size: 18),
+                  color: Colors.black45,
+                  onPressed: () {
+                    controller.clear();
+                    onChanged('');
+                    // Put the keyboard away with the search: the driver is
+                    // going back to reading the list, not typing again.
+                    FocusScope.of(context).unfocus();
+                  },
+                )
+              : null,
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          filled: true,
+          fillColor: Colors.grey.shade100,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.grey.shade300),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.grey.shade300),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: buttonMainColor),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ──────────────────────── Area Filter Bar ─────────────────────────────────
 //
 // A horizontally scrollable row of filter chips — one per delivery area the
@@ -551,12 +685,19 @@ class _OrderList extends StatelessWidget {
   final List<OrderModel> orders;
   final String emptyMessage;
 
-  const _OrderList({required this.orders, required this.emptyMessage});
+  // Second line of the empty state. Null keeps the tab's usual one.
+  final String? emptyHint;
+
+  const _OrderList({
+    required this.orders,
+    required this.emptyMessage,
+    this.emptyHint,
+  });
 
   @override
   Widget build(BuildContext context) {
     if (orders.isEmpty) {
-      return _EmptyState(message: emptyMessage);
+      return _EmptyState(message: emptyMessage, hint: emptyHint);
     }
 
     return ListView.builder(
@@ -805,12 +946,19 @@ class _StatusBadge extends StatelessWidget {
 // Completed orders are read-only.
 
 class _CompletedOrderList extends StatelessWidget {
-  // Already narrowed by the area filter; `delivery` is still needed for the
-  // loading and error states, which are not per-area.
+  // Already narrowed by the area filter or the search; `delivery` is still
+  // needed for the loading and error states, which are neither.
   final List<OrderModel> orders;
   final DeliveryProvider delivery;
+  final String emptyMessage;
+  final String? emptyHint;
 
-  const _CompletedOrderList({required this.orders, required this.delivery});
+  const _CompletedOrderList({
+    required this.orders,
+    required this.delivery,
+    required this.emptyMessage,
+    this.emptyHint,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -840,7 +988,8 @@ class _CompletedOrderList extends StatelessWidget {
     // Show the empty state if there are no completed orders yet.
     if (orders.isEmpty) {
       return _EmptyState(
-        message: context.l10n.noDeliveriesToday,
+        message: emptyMessage,
+        hint: emptyHint,
         isCompletedTab: true,
       );
     }
@@ -1010,13 +1159,25 @@ class _EmptyState extends StatelessWidget {
   final String message;
   final bool isCompletedTab;
 
-  const _EmptyState({required this.message, this.isCompletedTab = false});
+  // Overrides the second line. Used by the search, where "pull down to refresh"
+  // would be advice that cannot help — the order is simply on another tab.
+  final String? hint;
+
+  const _EmptyState({
+    required this.message,
+    this.hint,
+    this.isCompletedTab = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final icon = isCompletedTab
-        ? Icons.check_circle_outline
-        : Icons.inbox_outlined;
+    // A search that found nothing here is not the same emptiness as a tab with
+    // no orders in it, and the magnifying glass says which one this is.
+    final icon = hint != null
+        ? Icons.search_off
+        : isCompletedTab
+            ? Icons.check_circle_outline
+            : Icons.inbox_outlined;
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -1035,9 +1196,10 @@ class _EmptyState extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          isCompletedTab
-              ? context.l10n.completedWillAppearHere
-              : context.l10n.pullDownToRefresh,
+          hint ??
+              (isCompletedTab
+                  ? context.l10n.completedWillAppearHere
+                  : context.l10n.pullDownToRefresh),
           textAlign: TextAlign.center,
           style: const TextStyle(color: Colors.black26, fontSize: 13),
         ),
