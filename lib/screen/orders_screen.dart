@@ -19,7 +19,8 @@
 //                     area (Beirut, Metn, Keserwan, ...). Replaced an earlier
 //                     per-city filter; see _AreaFilterBar for why.
 //  8. Order search  — a field above the tabs that finds one order by its
-//                     number, typed without the '#'. See _OrderSearchField.
+//                     number, typed without the '#', and opens the tab that
+//                     order is on. See _OrderSearchField and _jumpToMatchingTab.
 
 import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/models/order_model.dart';
@@ -198,6 +199,54 @@ class _OrdersScreenState extends State<OrdersScreen>
     return _filterByArea(orders);
   }
 
+  // Orders not currently being delivered — what the Pending tab holds.
+  List<OrderModel> _pendingFrom(DeliveryProvider delivery) {
+    final activeIds = delivery.activeOrderIds;
+    return delivery.orders.where((o) => !activeIds.contains(o.id)).toList();
+  }
+
+  // The four lists in tab order, so the search can reason about the tab bar
+  // without repeating which tab shows what.
+  List<List<OrderModel>> _tabLists(DeliveryProvider delivery) => [
+    delivery.orders,
+    _pendingFrom(delivery),
+    delivery.returnedOrders,
+    delivery.completedOrders,
+  ];
+
+  // Opens the tab the searched order is actually sitting on.
+  //
+  // An order the driver returned or delivered is not on the All tab, so
+  // searching its number from there used to land on an empty list and read as
+  // though the order did not exist. The count in each tab label said otherwise,
+  // but only to a driver who thought to look up at it.
+  //
+  // Called as the driver types, so the tab follows the number narrowing down:
+  // '2' still matches half the All tab and stays put, while the full 2693 that
+  // only matches a delivered order opens Completed.
+  void _jumpToMatchingTab(String text) {
+    final query = normalizeOrderQuery(text);
+    if (query.isEmpty) return;
+
+    final lists = _tabLists(context.read<DeliveryProvider>());
+    bool holdsMatch(List<OrderModel> orders) =>
+        orders.any((o) => orderNumberMatches(o.orderNumber, query));
+
+    // Never move a driver off a tab that already answers their search: having
+    // opened Completed to look through delivered orders is a choice, and the
+    // All tab holding the same order is no reason to overrule it.
+    if (holdsMatch(lists[_tabController.index])) return;
+
+    final target = lists.indexWhere(holdsMatch);
+
+    // Nothing anywhere — a number typed halfway, or an order that is not the
+    // driver's. Leave them where they are rather than shuffling the tabs
+    // under a search that has not found anything yet.
+    if (target == -1) return;
+
+    _tabController.animateTo(target);
+  }
+
   @override
   Widget build(BuildContext context) {
     // context.watch rebuilds this widget automatically whenever DeliveryProvider
@@ -211,9 +260,7 @@ class _OrdersScreenState extends State<OrdersScreen>
     final isActive = activeIds.isNotEmpty;
 
     // Pending tab: all orders except the ones currently being delivered.
-    final pendingOrders = delivery.orders
-        .where((o) => !activeIds.contains(o.id))
-        .toList();
+    final pendingOrders = _pendingFrom(delivery);
 
     return Scaffold(
       backgroundColor: backgroundColor,
@@ -258,7 +305,12 @@ class _OrdersScreenState extends State<OrdersScreen>
         children: [
           _OrderSearchField(
             controller: _searchController,
-            onChanged: (text) => setState(() => _searchText = text),
+            onChanged: (text) {
+              setState(() => _searchText = text);
+              // After the lists have been narrowed, so the tab this picks is
+              // the one the driver is about to be shown.
+              _jumpToMatchingTab(text);
+            },
           ),
           Expanded(
             child: RefreshIndicator(
@@ -319,11 +371,29 @@ class _OrdersScreenState extends State<OrdersScreen>
       delivery.completedOrders,
     ]);
 
+    // What each tab shows, narrowed by the search or the area chips.
+    final allTab = _visible(delivery.orders);
+    final pendingTab = _visible(pendingOrders);
+    final returnedTab = _visible(delivery.returnedOrders);
+    final completedTab = _visible(delivery.completedOrders);
+
     // While a search is running the tabs show whatever matched the number, so
     // the empty state says so rather than claiming the driver has no orders.
     String emptyMessage(String whenBrowsing) =>
         _isSearching ? l10n.noOrderMatching(_query) : whenBrowsing;
-    final String? emptyHint = _isSearching ? l10n.tryOtherTabs : null;
+
+    // Typing a number opens the tab holding it, so an empty tab during a search
+    // usually means the number is on no tab at all — and telling that driver to
+    // keep looking would send them through four empty tabs. Only when the order
+    // is genuinely elsewhere, which is a driver who moved tabs by hand after
+    // the search landed, is that the advice worth giving.
+    final bool foundSomewhere = allTab.isNotEmpty ||
+        pendingTab.isNotEmpty ||
+        returnedTab.isNotEmpty ||
+        completedTab.isNotEmpty;
+    final String? emptyHint = !_isSearching
+        ? null
+        : (foundSomewhere ? l10n.tryOtherTabs : l10n.orderNotInYourList);
 
     // Main layout: earnings strip, area filter, then the four tab views.
     return Column(
@@ -351,25 +421,25 @@ class _OrdersScreenState extends State<OrdersScreen>
             children: [
               // All tab — every assigned order.
               _OrderList(
-                orders: _visible(delivery.orders),
+                orders: allTab,
                 emptyMessage: emptyMessage(l10n.noOrdersAssigned),
                 emptyHint: emptyHint,
               ),
               // Pending tab — orders not started yet.
               _OrderList(
-                orders: _visible(pendingOrders),
+                orders: pendingTab,
                 emptyMessage: emptyMessage(l10n.noPendingOrders),
                 emptyHint: emptyHint,
               ),
               // Returned tab — orders the driver marked as returned.
               _OrderList(
-                orders: _visible(delivery.returnedOrders),
+                orders: returnedTab,
                 emptyMessage: emptyMessage(l10n.noReturnedOrders),
                 emptyHint: emptyHint,
               ),
               // Done tab — read-only cards for completed deliveries.
               _CompletedOrderList(
-                orders: _visible(delivery.completedOrders),
+                orders: completedTab,
                 delivery: delivery,
                 emptyMessage: emptyMessage(l10n.noDeliveriesToday),
                 emptyHint: emptyHint,
