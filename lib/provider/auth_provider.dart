@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:delivery_boy_app/services/api_client.dart';
+import 'package:delivery_boy_app/services/background_location_service.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -153,6 +154,12 @@ class AuthProvider extends ChangeNotifier {
     _driver = null;
     _error = null;
     notifyListeners();
+
+    // Stops location sharing along with the session. The service does stop
+    // itself once the token is gone, but it would carry the previous driver's
+    // orders in its stored lists until then — and on a shared phone the next
+    // person to log in would inherit them.
+    await BackgroundLocationService.stopTracking();
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);

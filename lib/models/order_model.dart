@@ -119,6 +119,16 @@ class OrderModel {
   // history by date and filtering earnings by period.
   final DateTime? deliveredAt;
 
+  // Where the backend thinks this order is in its lifecycle: 'UNFULFILLED',
+  // 'ASSIGNED', 'PICKED_UP', 'OUT_FOR_DELIVERY'. The app has its own local
+  // notion of a delivery being under way (DeliveryProvider's status map), but
+  // that one only knows what happened on this phone — the dispatcher marking
+  // an order PICKED_UP from the dashboard is invisible to it. This field is
+  // what carries that decision to the app, and it is what starts the driver's
+  // location sharing without them having to open anything. Empty against a
+  // backend that does not send the column.
+  final String orderStatus;
+
   OrderModel({
     required this.id,
     required this.customerName,
@@ -139,6 +149,7 @@ class OrderModel {
     this.isPaid = false,
     this.isPrepaid = false,
     this.deliveredAt,
+    this.orderStatus = '',
   });
 
   // Returns a copy with only the named fields changed. OrderModel is immutable
@@ -174,6 +185,7 @@ class OrderModel {
       // earnings totals rely on. It is deliberately not a parameter here.
       isPrepaid: isPrepaid,
       deliveredAt: deliveredAt,
+      orderStatus: orderStatus,
     );
   }
 
@@ -274,6 +286,8 @@ class OrderModel {
       isPaid: financialStatus == 'paid',
       isPrepaid: isPrepaid,
       deliveredAt: deliveredAt,
+      orderStatus:
+          (json['order_status'] ?? '').toString().trim().toUpperCase(),
     );
   }
 
