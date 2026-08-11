@@ -25,12 +25,8 @@ class DriverPayRow extends StatelessWidget {
 
     return Row(
       children: [
-        const Icon(
-          Icons.account_balance_wallet_outlined,
-          color: Colors.white70,
-          size: 18,
-        ),
-        const SizedBox(width: 8),
+        // No icon: the label sits flush with "Total Earned" on the line above,
+        // which is the figure it belongs beside.
         Expanded(
           child: Text(
             l10n.yourEarnings,
