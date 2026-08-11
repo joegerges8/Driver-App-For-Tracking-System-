@@ -96,9 +96,6 @@ class AppLocalizations {
   // The driver's own pay — the delivery fees owed to them — as opposed to
   // totalEarned above, which is the store's cash they collected at the door.
   String get yourEarnings => _t('yourEarnings');
-  // Caption under that figure showing how it adds up: "3 × $2 per delivery".
-  String earningsPerDelivery(int count, int rate) =>
-      '$count × \$$rate ${_t('perDelivery')}';
   String get completed => _t('completed');
   String get inProgress => _t('inProgress');
   String get filterAll => _t('filterAll');
@@ -248,7 +245,6 @@ class AppLocalizations {
     'tabCompleted': 'Completed',
     'totalEarned': 'Total Earned',
     'yourEarnings': 'Your Earnings',
-    'perDelivery': 'per delivery',
     'completed': 'Completed',
     'inProgress': 'In Progress',
     'filterAll': 'All',
@@ -374,7 +370,6 @@ class AppLocalizations {
     'tabCompleted': 'مكتملة',
     'totalEarned': 'إجمالي الأرباح',
     'yourEarnings': 'أرباحك',
-    'perDelivery': 'لكل توصيلة',
     'completed': 'المكتملة',
     'inProgress': 'قيد التنفيذ',
     'filterAll': 'الكل',
