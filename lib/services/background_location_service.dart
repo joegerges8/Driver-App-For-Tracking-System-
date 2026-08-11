@@ -24,24 +24,15 @@ const _orderIdsKey = 'bg_active_order_ids';
 // going dark, then cleared.
 const _legacyOrderIdKey = 'bg_active_order_id';
 
-// The backend's own view of this driver's work, refreshed by the service on
-// its own timer so it holds true while the app is merely put away and the
-// screen-bound polling in DeliveryProvider has stopped.
+// Every order still assigned to this driver and not finished, refreshed by the
+// service on its own timer so it holds true while the app is merely put away
+// and the screen-bound polling in DeliveryProvider has stopped.
 //
-//   _backendOnRoadKey — orders the backend says are on the road (PICKED_UP or
-//                       OUT_FOR_DELIVERY). The dispatcher flipping an order to
-//                       PICKED_UP from the dashboard shows up here, and that
-//                       is what starts this driver sharing location without
-//                       them tapping anything.
-//   _backendOpenKey   — every order still assigned to the driver and not
-//                       finished. Anything absent from it has been delivered,
-//                       returned, cancelled or taken away, and must stop being
-//                       pinged for even if this phone started it.
-const _backendOnRoadKey = 'bg_backend_on_road_ids';
+// Anything absent from it has been delivered, returned, cancelled or taken
+// away, and must stop being pinged for even if this phone started it. It is a
+// stop condition only — it never starts a delivery. What starts one is the
+// driver tapping "Start Delivery", and nothing else.
 const _backendOpenKey = 'bg_backend_open_ids';
-
-// Order statuses that mean the driver is carrying this order right now.
-const _onRoadStatuses = {'PICKED_UP', 'OUT_FOR_DELIVERY'};
 
 // Shared with the rest of the app so a --dart-define pointing at a staging
 // backend reaches the background isolate too, instead of it quietly carrying
@@ -82,29 +73,31 @@ Future<List<String>> _readActiveOrderIds(SharedPreferences prefs) async {
   return const [];
 }
 
-/// Which orders should be receiving GPS right now.
+/// Which orders should be receiving per-order GPS right now.
 ///
-/// Two things can put an order on the road, and either is enough:
-///   - the driver tapped "Start Delivery" on this phone, or
-///   - the dispatcher marked it PICKED_UP on the dashboard.
+/// These pings are what the customer's tracking page is built on, so exactly
+/// one thing starts them: the driver tapping "Start Delivery" on this phone.
+/// The dispatcher marking an order PICKED_UP deliberately does not — a
+/// customer must not watch their driver moving around before the driver has
+/// said they are setting off, whatever the paperwork says. (This is separate
+/// from the driver's own position, which goes to the dispatcher's map for as
+/// long as the app is open and never reaches a customer.)
 ///
-/// One thing takes it off, and it overrules both: the backend no longer
-/// listing it as open. That is what stops a delivered or returned order from
-/// pinning the driver to the map — this phone's memory of having started it is
+/// One thing stops them, and it overrules the tap: the backend no longer
+/// listing the order as open. That is what stops a delivered or returned
+/// delivery from streaming on — this phone's memory of having started it is
 /// not evidence that it is still going.
 ///
 /// The backend's list is only applied once it has actually been fetched. Until
-/// then — first run, or offline since launch — a locally started delivery
-/// keeps streaming rather than being second-guessed by a list we do not have.
+/// then — first run, or offline since launch — a started delivery keeps
+/// streaming rather than being second-guessed by a list we do not have.
 Future<List<String>> _resolveTrackedOrderIds(SharedPreferences prefs) async {
   final started = await _readActiveOrderIds(prefs);
-  final onRoad = prefs.getStringList(_backendOnRoadKey) ?? const [];
   final open = prefs.getStringList(_backendOpenKey);
 
-  final wanted = <String>{...started, ...onRoad};
-  if (open == null) return wanted.toList();
+  if (open == null) return started;
 
-  return wanted.where(open.contains).toList();
+  return started.where(open.contains).toList();
 }
 
 class BackgroundLocationService {
@@ -135,14 +128,13 @@ class BackgroundLocationService {
     );
   }
 
-  /// Starts watching for work, for as long as the app is running.
+  /// Starts reporting, for as long as the app is running.
   ///
-  /// This is what makes "the dispatcher marks it PICKED_UP and the driver
-  /// starts being tracked" work without the driver tapping anything: while it
-  /// runs it asks the backend what this driver is carrying, and turns GPS on
-  /// by itself the moment an order comes back on the road. With nothing to
-  /// carry it costs one small request every half minute and does not touch the
-  /// GPS at all.
+  /// Two separate streams come out of this, and they answer to different
+  /// people. The driver's own position goes to the dispatcher's map every
+  /// tick, order or no order, so a free driver can be seen and given work.
+  /// The per-order pings that feed a customer's tracking page are not started
+  /// here at all — only "Start Delivery" does that.
   ///
   /// It is deliberately tied to the app's life, not the driver's shift. The
   /// service is declared android:stopWithTask="true" and does not start on
@@ -175,16 +167,14 @@ class BackgroundLocationService {
   /// Hands the app's freshly fetched order list to the service.
   ///
   /// The service polls for this itself, but the app in the foreground has
-  /// often just asked the same question — passing the answer along means a
-  /// dispatcher's PICKED_UP takes effect on the next tick rather than waiting
-  /// for the service to get round to asking too.
+  /// often just asked the same question — passing the answer along means an
+  /// order that has left the driver's hands stops being pinged for on the next
+  /// tick, rather than waiting for the service to get round to asking too.
   static Future<void> publishBackendOrders({
     required Iterable<String> openOrderIds,
-    required Iterable<String> onRoadOrderIds,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_backendOpenKey, openOrderIds.toList());
-    await prefs.setStringList(_backendOnRoadKey, onRoadOrderIds.toList());
   }
 
   /// Removes a single order from the tracked set, leaving the driver's other
@@ -195,10 +185,8 @@ class BackgroundLocationService {
   /// it goes quiet and stops touching the GPS, but it stays listening for the
   /// next order the dispatcher sends. Closing the app is what ends it.
   ///
-  /// The order is struck off the backend's on-road list as well as this
-  /// phone's. Marking a delivery done here is the most recent word on it, and
-  /// without this the pings would carry on for the half-minute or so until the
-  /// next refresh caught up with what the driver already knows.
+  /// Striking the order off this phone's started list is enough to stop its
+  /// pings immediately, since that list is the only thing that starts them.
   static Future<void> stopTrackingOrder(String orderId) async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -207,14 +195,6 @@ class BackgroundLocationService {
       _orderIdsKey,
       started.where((id) => id != orderId).toList(),
     );
-
-    final onRoad = prefs.getStringList(_backendOnRoadKey);
-    if (onRoad != null) {
-      await prefs.setStringList(
-        _backendOnRoadKey,
-        onRoad.where((id) => id != orderId).toList(),
-      );
-    }
   }
 
   /// Stops tracking every order and shuts the service down. Clears everything
@@ -225,7 +205,6 @@ class BackgroundLocationService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_orderIdsKey);
     await prefs.remove(_legacyOrderIdKey);
-    await prefs.remove(_backendOnRoadKey);
     await prefs.remove(_backendOpenKey);
     _svc.invoke('stopService');
   }
@@ -286,10 +265,10 @@ void _onStart(ServiceInstance service) async {
     await prefs.reload(); // pick up ids written by the UI isolate
     final token = prefs.getString(_tokenKey);
 
-    // Logging out ends it. Having nothing to deliver does not: a driver with
-    // the app open and no order yet is exactly who needs someone still
-    // listening for the dispatcher to hand them a job. Closing the app ends it
-    // too, but that is Android's doing via stopWithTask, not this check.
+    // Logging out ends it. Having nothing to deliver does not: the driver's
+    // own position still goes to the dispatcher's map for as long as the app
+    // is open. Closing the app ends it too, but that is Android's doing via
+    // stopWithTask, not this check.
     if (token == null) {
       service.stopSelf();
       return;
@@ -387,14 +366,14 @@ Future<void> _postDriverLocation(String token, Position position) async {
   }
 }
 
-// Asks the backend what this driver is carrying and records the answer for
-// _resolveTrackedOrderIds to act on.
+// Asks the backend which orders this driver still holds and records the answer
+// for _resolveTrackedOrderIds to act on.
 //
-// A failed request deliberately writes nothing. The stored lists are what
-// decide whether GPS flows, and treating a dropped connection as "no orders"
-// would cut a delivery's tracking dead every time the driver went through a
-// tunnel. Stale is the safe direction here: keep pinging what we last knew
-// about, and correct it when the network comes back.
+// A failed request deliberately writes nothing. This list is what can stop GPS
+// flowing, and treating a dropped connection as "no orders" would cut a
+// delivery's tracking dead every time the driver went through a tunnel. Stale
+// is the safe direction here: keep pinging what we last knew about, and
+// correct it when the network comes back.
 Future<void> _refreshBackendOrders(
   SharedPreferences prefs,
   String token,
@@ -411,7 +390,6 @@ Future<void> _refreshBackendOrders(
     if (decoded is! List) return;
 
     final open = <String>[];
-    final onRoad = <String>[];
 
     for (final item in decoded) {
       if (item is! Map) continue;
@@ -422,13 +400,9 @@ Future<void> _refreshBackendOrders(
       // delivered, returned and cancelled ones are already filtered out server
       // side — so everything here is open by definition.
       open.add(id);
-
-      final status = (item['order_status'] ?? '').toString().toUpperCase();
-      if (_onRoadStatuses.contains(status)) onRoad.add(id);
     }
 
     await prefs.setStringList(_backendOpenKey, open);
-    await prefs.setStringList(_backendOnRoadKey, onRoad);
   } catch (_) {
     // Offline or a bad response — keep the last known lists.
   }
