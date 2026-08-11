@@ -212,7 +212,7 @@ class DeliveryProvider extends ChangeNotifier {
       // Do not reset in-progress deliveries just because Home/Orders refreshed.
       // Keep the driver's local progress until each order is delivered or returned.
       _reapplyActiveOrders(activeOrdersById, parsed.map((o) => o.id).toSet());
-      _adoptBackendDeliveryStatus(parsed);
+      _publishBackendOrders(parsed);
       _currentOrder = _pickCurrentOrder(previousCurrentId);
       _ordersError = null;
     } catch (e) {
@@ -283,51 +283,26 @@ class DeliveryProvider extends ChangeNotifier {
     }
   }
 
-  // Order statuses that mean the dispatcher has put this order on the road.
-  static const _onRoadStatuses = {'PICKED_UP', 'OUT_FOR_DELIVERY'};
-
-  // Takes the dispatcher's word for which orders are under way.
+  // Tells the background service which orders the driver still holds.
   //
-  // "Start Delivery" in the app is no longer the only way a delivery begins:
-  // marking an order PICKED_UP on the dashboard starts it too, and the driver
-  // should not have to tap anything for their location to start flowing. Any
-  // order the backend reports as on the road is adopted here as in progress,
-  // which both starts its GPS stream and puts the order detail screen into the
-  // delivering state so the driver sees the same thing the dispatcher does.
+  // Only ever a stop condition. An order missing from this list has been
+  // delivered, returned, cancelled or taken away, and its GPS stream ends even
+  // if this phone started it — that is what stops a finished delivery from
+  // streaming on until the app is restarted.
   //
-  // It only ever promotes. An order this phone has already finished stays
-  // finished: a DELIVERED or RETURNED patch that has not landed yet would
-  // otherwise be undone by the very next poll, restarting the GPS for a
-  // delivery the driver has walked away from.
-  //
-  // The backend's view is also handed to the background service, which polls
-  // for the same thing on its own but usually a few seconds behind this.
-  void _adoptBackendDeliveryStatus(List<OrderModel> parsed) {
-    final open = <String>[];
-    final onRoad = <String>[];
+  // Deliberately nothing here starts a delivery. The dispatcher marking an
+  // order PICKED_UP moves the paperwork; it does not mean the driver has set
+  // off, and a customer watching their tracking page must not see a driver
+  // moving around until the driver themselves says so by tapping "Start
+  // Delivery". The service polls for the same list on its own timer; passing
+  // it along here just gets the answer there a few seconds sooner.
+  void _publishBackendOrders(List<OrderModel> parsed) {
+    final open = [
+      for (final order in parsed)
+        if (order.id.isNotEmpty) order.id,
+    ];
 
-    for (final order in parsed) {
-      if (order.id.isEmpty) continue;
-      open.add(order.id);
-
-      if (!_onRoadStatuses.contains(order.orderStatus)) continue;
-      onRoad.add(order.id);
-
-      final local = _statusById[order.id];
-      if (local == DeliveryStatus.delivered ||
-          local == DeliveryStatus.returned ||
-          local == DeliveryStatus.delivering) {
-        continue;
-      }
-
-      _statusById[order.id] = DeliveryStatus.delivering;
-      BackgroundLocationService.startTracking(order.id);
-    }
-
-    BackgroundLocationService.publishBackendOrders(
-      openOrderIds: open,
-      onRoadOrderIds: onRoad,
-    );
+    BackgroundLocationService.publishBackendOrders(openOrderIds: open);
   }
 
   // Erases every trace of an order the backend no longer has: its local
