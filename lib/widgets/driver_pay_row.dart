@@ -9,9 +9,9 @@ import 'package:flutter/material.dart';
 // apart — they are showing the same fact about the same driver, and a driver
 // who reads two different figures for their pay stops trusting either.
 //
-// Every completed delivery earns the flat fee in utils/earnings.dart, so the
-// caption spells the sum out ("3 × $2 per delivery") and the driver can check
-// the figure against the deliveries they remember making.
+// The rate itself is not spelled out here: it is a standing arrangement the
+// driver already knows, and the delivery count it multiplies is on the same
+// banner either way.
 class DriverPayRow extends StatelessWidget {
   // How many deliveries the figure covers. On the Shipment tab this is the
   // selected period's count, on the Orders tab it is every completed order.
@@ -32,18 +32,9 @@ class DriverPayRow extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                l10n.yourEarnings,
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
-              ),
-              Text(
-                l10n.earningsPerDelivery(count, driverFeePerDelivery),
-                style: const TextStyle(color: Colors.white54, fontSize: 11),
-              ),
-            ],
+          child: Text(
+            l10n.yourEarnings,
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
         ),
         const SizedBox(width: 12),
