@@ -470,15 +470,13 @@ class OrderDetailScreen extends StatelessWidget {
       return;
     }
 
+    // No confirmation snackbar on purpose. The bottom bar swapping from
+    // "Start Delivery" to the returned/delivered pair already says the tap
+    // landed, and drivers found being told their location is being shared —
+    // every single time they start an order — worth removing.
     context
         .read<DeliveryProvider>()
         .startDelivery(driverLocation: loc.currentLocation);
-
-    showAppSnackbar(
-      context: context,
-      type: SnackbarType.success,
-      description: context.l10n.deliveryStartedSharing,
-    );
   }
 
   // Closes out the order as either delivered or returned, then goes back to

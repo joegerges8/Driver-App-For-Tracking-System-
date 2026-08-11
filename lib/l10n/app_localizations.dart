@@ -151,7 +151,6 @@ class AppLocalizations {
   String get markAsReturned => _t('markAsReturned');
   String get markAsDelivered => _t('markAsDelivered');
   String get gettingLocationRetry => _t('gettingLocationRetry');
-  String get deliveryStartedSharing => _t('deliveryStartedSharing');
   String get orderMarkedReturned => _t('orderMarkedReturned');
   String get orderMarkedDelivered => _t('orderMarkedDelivered');
   String statusSyncFailed(String error) => '${_t('statusSyncFailed')}: $error';
@@ -291,7 +290,6 @@ class AppLocalizations {
     'markAsReturned': 'Mark as Returned',
     'markAsDelivered': 'Mark as Delivered',
     'gettingLocationRetry': 'Getting your current location… try again in a moment.',
-    'deliveryStartedSharing': 'Delivery started. Your location is now being shared.',
     'orderMarkedReturned': 'Order marked as returned',
     'orderMarkedDelivered': 'Order marked as delivered',
     'statusSyncFailed': 'Status sync failed',
@@ -418,7 +416,6 @@ class AppLocalizations {
     'markAsReturned': 'تحديد كمرتجع',
     'markAsDelivered': 'تحديد كتم التوصيل',
     'gettingLocationRetry': 'جارٍ تحديد موقعك الحالي… حاول مرة أخرى بعد لحظات.',
-    'deliveryStartedSharing': 'بدأ التوصيل. تتم مشاركة موقعك الآن.',
     'orderMarkedReturned': 'تم تحديد الطلب كمرتجع',
     'orderMarkedDelivered': 'تم تحديد الطلب كتم التوصيل',
     'statusSyncFailed': 'فشلت مزامنة الحالة',
