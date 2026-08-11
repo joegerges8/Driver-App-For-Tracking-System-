@@ -106,9 +106,12 @@ class AppLocalizations {
   // '#' by the search itself, so the '#' in the sentence is the only one.
   String noOrderMatching(String query) =>
       _t('noOrderMatching').replaceFirst('{n}', query);
-  // Sits under the message above: the searched order may well exist, just on
-  // another tab — a delivered one is not in Pending, and vice versa.
+  // Sits under the message above when the order is on a tab the driver has
+  // since moved away from by hand — the search itself opens the right one.
   String get tryOtherTabs => _t('tryOtherTabs');
+  // Sits there instead when the number matched nothing on any tab, so the
+  // driver is not sent hunting through four empty ones.
+  String get orderNotInYourList => _t('orderNotInYourList');
   String get noOrdersAssigned => _t('noOrdersAssigned');
   String get noPendingOrders => _t('noPendingOrders');
   String get noReturnedOrders => _t('noReturnedOrders');
@@ -261,6 +264,7 @@ class AppLocalizations {
     'searchOrderNumber': 'Search order number, e.g. 2693',
     'noOrderMatching': 'No order #{n} here',
     'tryOtherTabs': 'Check the other tabs',
+    'orderNotInYourList': 'This order is not in your list',
     'noOrdersAssigned': 'No orders assigned yet',
     'noPendingOrders': 'No pending orders',
     'noReturnedOrders': 'No returned orders',
@@ -389,6 +393,7 @@ class AppLocalizations {
     'searchOrderNumber': 'ابحث برقم الطلب، مثال 2693',
     'noOrderMatching': 'لا يوجد طلب رقم {n} هنا',
     'tryOtherTabs': 'تحقّق من التبويبات الأخرى',
+    'orderNotInYourList': 'هذا الطلب ليس في قائمتك',
     'noOrdersAssigned': 'لا توجد طلبات مسندة بعد',
     'noPendingOrders': 'لا توجد طلبات قيد الانتظار',
     'noReturnedOrders': 'لا توجد طلبات مرتجعة',
