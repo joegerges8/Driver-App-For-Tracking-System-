@@ -100,6 +100,15 @@ class AppLocalizations {
   String get inProgress => _t('inProgress');
   String get filterAll => _t('filterAll');
   String get areaOther => _t('areaOther');
+  // Hint inside the order-number search field on the Orders tab.
+  String get searchOrderNumber => _t('searchOrderNumber');
+  // Empty state while a search is running. The query is already stripped of its
+  // '#' by the search itself, so the '#' in the sentence is the only one.
+  String noOrderMatching(String query) =>
+      _t('noOrderMatching').replaceFirst('{n}', query);
+  // Sits under the message above: the searched order may well exist, just on
+  // another tab — a delivered one is not in Pending, and vice versa.
+  String get tryOtherTabs => _t('tryOtherTabs');
   String get noOrdersAssigned => _t('noOrdersAssigned');
   String get noPendingOrders => _t('noPendingOrders');
   String get noReturnedOrders => _t('noReturnedOrders');
@@ -249,6 +258,9 @@ class AppLocalizations {
     'inProgress': 'In Progress',
     'filterAll': 'All',
     'areaOther': 'Other',
+    'searchOrderNumber': 'Search order number, e.g. 2693',
+    'noOrderMatching': 'No order #{n} here',
+    'tryOtherTabs': 'Check the other tabs',
     'noOrdersAssigned': 'No orders assigned yet',
     'noPendingOrders': 'No pending orders',
     'noReturnedOrders': 'No returned orders',
@@ -374,6 +386,9 @@ class AppLocalizations {
     'inProgress': 'قيد التنفيذ',
     'filterAll': 'الكل',
     'areaOther': 'أخرى',
+    'searchOrderNumber': 'ابحث برقم الطلب، مثال 2693',
+    'noOrderMatching': 'لا يوجد طلب رقم {n} هنا',
+    'tryOtherTabs': 'تحقّق من التبويبات الأخرى',
     'noOrdersAssigned': 'لا توجد طلبات مسندة بعد',
     'noPendingOrders': 'لا توجد طلبات قيد الانتظار',
     'noReturnedOrders': 'لا توجد طلبات مرتجعة',
