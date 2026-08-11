@@ -25,6 +25,23 @@ const _legacyOrderIdKey = 'bg_active_order_id';
 
 const _baseUrl = 'https://dispatcher-dashboard.up.railway.app';
 
+// The foreground-service notification, cut down to the least Android will
+// accept. GPS that survives the app being backgrounded or force-killed has to
+// run in a foreground service, and Android has required every foreground
+// service to post a visible notification since Oreo — there is no flag that
+// removes it. What is left is making it say as little as possible: no body
+// text, and a channel (see MainActivity.kt) at IMPORTANCE_MIN so it is silent,
+// carries no status-bar icon, no badge and no lock-screen entry, and sits
+// collapsed at the bottom of the shade. On Android 13+ the driver can also
+// swipe it away and it stays gone for that run.
+//
+// The channel id is versioned because a channel's importance is fixed at
+// creation: existing installs already have 'driver_location_channel', and
+// re-creating it with a lower importance is a no-op. A new id is the only way
+// to get the quieter settings onto phones the old build already touched.
+const _notificationChannelId = 'driver_location_channel_v2';
+const _notificationTitle = 'Driver App';
+
 // Reads the active order ids, migrating the legacy single-id key if present.
 // Shared by the UI isolate and the background isolate — both need the same
 // view of which orders are active, and only SharedPreferences is visible to both.
@@ -52,9 +69,9 @@ class BackgroundLocationService {
         onStart: _onStart,
         autoStart: false,
         isForegroundMode: true,
-        notificationChannelId: 'driver_location_channel',
-        initialNotificationTitle: 'Driver App – Location Active',
-        initialNotificationContent: 'Sharing your location with the dispatcher',
+        notificationChannelId: _notificationChannelId,
+        initialNotificationTitle: _notificationTitle,
+        initialNotificationContent: '',
         foregroundServiceNotificationId: 888,
       ),
       iosConfiguration: IosConfiguration(
@@ -133,8 +150,8 @@ void _onStart(ServiceInstance service) async {
 
   if (service is AndroidServiceInstance) {
     service.setForegroundNotificationInfo(
-      title: 'Driver App – Location Active',
-      content: 'Sharing your location with the dispatcher',
+      title: _notificationTitle,
+      content: '',
     );
   }
 
