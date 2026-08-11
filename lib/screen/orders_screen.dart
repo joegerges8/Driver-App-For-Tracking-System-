@@ -538,6 +538,7 @@ class _OrderSearchField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasText = controller.text.isNotEmpty;
+    final isRtl = Directionality.of(context) == TextDirection.rtl;
 
     return Container(
       color: Colors.white,
@@ -548,9 +549,28 @@ class _OrderSearchField extends StatelessWidget {
         keyboardType: TextInputType.number,
         textInputAction: TextInputAction.search,
         style: const TextStyle(fontSize: 14),
+        // An order number reads left to right in every language — 2693 is 2693
+        // in Arabic too. Without this the field inherited the Arabic build's
+        // right-to-left direction and laid the digits out as a left-to-right
+        // island inside a right-to-left line, and the backspace key stopped
+        // deleting: the keyboard deletes the character before the cursor, and
+        // in that mixed-direction line the cursor sat at the start of the
+        // number rather than after the last digit, so there was nothing before
+        // it to delete. The driver was left clearing the whole number with the
+        // X to correct one digit. Pinning the direction makes the field behave
+        // exactly as it already does in English.
+        textDirection: TextDirection.ltr,
+        // Alignment is separate from direction: this keeps the number against
+        // the search icon, which sits on the right in Arabic, without putting
+        // the mixed-direction line — and the bug — back.
+        textAlign: isRtl ? TextAlign.right : TextAlign.left,
         decoration: InputDecoration(
           hintText: context.l10n.searchOrderNumber,
           hintStyle: const TextStyle(color: Colors.black38, fontSize: 14),
+          // The hint is a sentence in the app's own language, so it follows the
+          // app's direction rather than the number's — otherwise the Arabic
+          // hint renders with its comma and example number in the wrong places.
+          hintTextDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
           prefixIcon: const Icon(Icons.search, size: 20, color: Colors.black45),
           // Clearing is one tap, so a driver who searched an order and now
           // wants their list back is never left deleting digits.
