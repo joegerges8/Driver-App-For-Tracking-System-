@@ -94,13 +94,14 @@ class _AppMainScreenState extends State<AppMainScreen>
     if (token == null || token.isEmpty) return;
     context.read<DeliveryProvider>().startAutoRefresh(token: token);
 
-    // The polling above only runs while this screen is on the driver's phone
-    // screen, which is exactly when nothing important is being missed. The
-    // shift service is the half that keeps watching after they put the phone
-    // away: it is what notices the dispatcher marking an order PICKED_UP and
-    // starts sharing location for it. Starting it here covers logging in and
-    // reopening the app alike, and it is a no-op if it is already running.
-    BackgroundLocationService.startShift();
+    // The polling above stops the moment this screen leaves the driver's
+    // display. The service is the half that keeps watching while the app is
+    // merely put away — it is what notices the dispatcher marking an order
+    // PICKED_UP and starts sharing location for it, without the driver having
+    // to be looking at anything. It lives exactly as long as the app does:
+    // swiping the app away from recents ends it. Starting it here covers
+    // logging in and reopening alike, and does nothing if it already runs.
+    BackgroundLocationService.startWatching();
   }
 
   @override

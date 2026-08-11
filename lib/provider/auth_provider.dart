@@ -155,10 +155,10 @@ class AuthProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    // Ends the shift as well as the session. The service does stop itself once
-    // the token is gone, but it would carry the previous driver's orders in
-    // its stored lists until then — and on a shared phone the next person to
-    // log in would inherit them.
+    // Stops location sharing along with the session. The service does stop
+    // itself once the token is gone, but it would carry the previous driver's
+    // orders in its stored lists until then — and on a shared phone the next
+    // person to log in would inherit them.
     await BackgroundLocationService.stopTracking();
 
     final prefs = await SharedPreferences.getInstance();

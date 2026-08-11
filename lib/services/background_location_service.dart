@@ -25,7 +25,8 @@ const _orderIdsKey = 'bg_active_order_ids';
 const _legacyOrderIdKey = 'bg_active_order_id';
 
 // The backend's own view of this driver's work, refreshed by the service on
-// its own timer so it holds true with the app closed.
+// its own timer so it holds true while the app is merely put away and the
+// screen-bound polling in DeliveryProvider has stopped.
 //
 //   _backendOnRoadKey — orders the backend says are on the road (PICKED_UP or
 //                       OUT_FOR_DELIVERY). The dispatcher flipping an order to
@@ -115,6 +116,11 @@ class BackgroundLocationService {
       androidConfiguration: AndroidConfiguration(
         onStart: _onStart,
         autoStart: false,
+        // The plugin restarts the service after a reboot or an app update by
+        // default, which would put a driver back on the dashboard without the
+        // app ever being opened. Location sharing here is meant to last no
+        // longer than the app the driver chose to open.
+        autoStartOnBoot: false,
         isForegroundMode: true,
         notificationChannelId: _notificationChannelId,
         initialNotificationTitle: _notificationTitle,
@@ -129,21 +135,24 @@ class BackgroundLocationService {
     );
   }
 
-  /// Starts the service for a driver who is logged in, whether or not they
-  /// have anything to deliver yet.
+  /// Starts watching for work, for as long as the app is running.
   ///
   /// This is what makes "the dispatcher marks it PICKED_UP and the driver
-  /// starts being tracked" work at all. The service used to run only while an
-  /// order was in progress, which meant something had to already be happening
-  /// before the app could notice that something had begun — and with the app
-  /// in the driver's pocket, nothing was watching. Now the service is what
-  /// watches: while idle it costs one small request every half minute and
-  /// touches the GPS not at all, and it turns location on by itself the moment
-  /// the backend says an order is on the road.
+  /// starts being tracked" work without the driver tapping anything: while it
+  /// runs it asks the backend what this driver is carrying, and turns GPS on
+  /// by itself the moment an order comes back on the road. With nothing to
+  /// carry it costs one small request every half minute and does not touch the
+  /// GPS at all.
+  ///
+  /// It is deliberately tied to the app's life, not the driver's shift. The
+  /// service is declared android:stopWithTask="true" and does not start on
+  /// boot, so swiping the app away from recents ends it, and with it every
+  /// order's location stream — a driver who has closed the app is a driver the
+  /// dashboard stops following. Opening the app again picks everything back up.
   ///
   /// Safe to call on every app start and resume; it does nothing if the
   /// service is already running.
-  static Future<void> startShift() async {
+  static Future<void> startWatching() async {
     final isRunning = await _svc.isRunning();
     if (!isRunning) await _svc.startService();
   }
@@ -182,10 +191,9 @@ class BackgroundLocationService {
   /// deliveries streaming.
   ///
   /// This no longer stops the service when the last order finishes. The
-  /// service is the driver's shift now, not one delivery: finishing everything
-  /// on the list means it goes quiet and stops touching the GPS, but it stays
-  /// listening for the next order the dispatcher sends. Logging out is what
-  /// ends it.
+  /// service outlives any one delivery: finishing everything on the list means
+  /// it goes quiet and stops touching the GPS, but it stays listening for the
+  /// next order the dispatcher sends. Closing the app is what ends it.
   ///
   /// The order is struck off the backend's on-road list as well as this
   /// phone's. Marking a delivery done here is the most recent word on it, and
@@ -209,10 +217,10 @@ class BackgroundLocationService {
     }
   }
 
-  /// Stops tracking every order and ends the shift. Clears everything the
-  /// service decides from — including the backend's view, which would
-  /// otherwise start the next driver to log in on this phone straight into
-  /// the previous one's deliveries — and signals the isolate to stop.
+  /// Stops tracking every order and shuts the service down. Clears everything
+  /// it decides from — including the backend's view, which would otherwise
+  /// start the next driver to log in on this phone straight into the previous
+  /// one's deliveries — and signals the isolate to stop.
   static Future<void> stopTracking() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_orderIdsKey);
@@ -278,9 +286,10 @@ void _onStart(ServiceInstance service) async {
     await prefs.reload(); // pick up ids written by the UI isolate
     final token = prefs.getString(_tokenKey);
 
-    // Logging out is the only thing that ends the shift. Having nothing to
-    // deliver does not: an idle driver is exactly who needs someone still
-    // listening for the dispatcher to hand them a job.
+    // Logging out ends it. Having nothing to deliver does not: a driver with
+    // the app open and no order yet is exactly who needs someone still
+    // listening for the dispatcher to hand them a job. Closing the app ends it
+    // too, but that is Android's doing via stopWithTask, not this check.
     if (token == null) {
       service.stopSelf();
       return;
@@ -326,8 +335,8 @@ void _onStart(ServiceInstance service) async {
       //
       // Only this phone's own "I started this" list is edited. The backend's
       // two lists are its to write, and the next refresh will have dropped the
-      // order from them anyway. The service itself keeps running: the driver
-      // is still on shift, they have just lost one job.
+      // order from them anyway. The service itself keeps running: the app is
+      // still open, they have just lost one job.
       final gone = <String>{};
       for (var i = 0; i < orderIds.length; i++) {
         if (responses[i].statusCode == 404) gone.add(orderIds[i]);
