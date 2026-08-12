@@ -5,6 +5,7 @@ import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:delivery_boy_app/utils/delivery_day.dart';
 import 'package:delivery_boy_app/widgets/driver_pay_row.dart';
+import 'package:delivery_boy_app/widgets/order_title.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -483,15 +484,7 @@ class _HistoryCard extends StatelessWidget {
                 Icon(Icons.check_circle_outline,
                     size: 18, color: Colors.green.shade600),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    order.item,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 15),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
+                Expanded(child: OrderTitle(order: order)),
                 const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(

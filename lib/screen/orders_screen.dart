@@ -39,6 +39,7 @@ import 'package:delivery_boy_app/screen/order_detail_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:delivery_boy_app/utils/order_search.dart';
 import 'package:delivery_boy_app/utils/phone.dart';
+import 'package:delivery_boy_app/widgets/order_title.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -752,7 +753,7 @@ class _OrderListCard extends StatelessWidget {
                     color: Colors.black54,
                   ),
                   const SizedBox(width: 8),
-                  Expanded(child: _OrderTitle(order: order)),
+                  Expanded(child: OrderTitle(order: order)),
                   const SizedBox(width: 8),
                   // Status badge: orange "Pending" or green "Active".
                   _StatusBadge(isActive: isCurrentActive),
@@ -915,55 +916,6 @@ class _StatusBadge extends StatelessWidget {
   }
 }
 
-// ──────────────────────── Order Card Title ────────────────────────────────
-//
-// The order number, and next to it the store the order came from. Several
-// stores share this one delivery app, so the number alone does not tell the
-// driver who they are collecting the order from.
-//
-// The number keeps its full width and the store name is what gives way when
-// the header is too narrow for both — the number is how the driver looks an
-// order up, and a truncated store name still names the store.
-
-class _OrderTitle extends StatelessWidget {
-  final OrderModel order;
-
-  const _OrderTitle({required this.order});
-
-  @override
-  Widget build(BuildContext context) {
-    final store = order.storeName.trim();
-
-    return Row(
-      children: [
-        Text(
-          order.item, // e.g. "Order #1664"
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        // Empty against a backend that does not send the store, and the
-        // header then reads exactly as it did before.
-        if (store.isNotEmpty) ...[
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              '• $store',
-              style: const TextStyle(
-                color: Colors.black54,
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
 // ──────────────────────── Completed Order List (Done tab) ─────────────────
 //
 // Shows the orders this driver delivered today. These are fetched from a
@@ -1078,7 +1030,7 @@ class _CompletedOrderCard extends StatelessWidget {
                   color: Colors.green.shade600,
                 ),
                 const SizedBox(width: 8),
-                Expanded(child: _OrderTitle(order: order)),
+                Expanded(child: OrderTitle(order: order)),
                 const SizedBox(width: 8),
                 // "Delivered" badge in green.
                 Container(
