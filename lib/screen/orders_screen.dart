@@ -38,6 +38,7 @@ import 'package:delivery_boy_app/route.dart';
 import 'package:delivery_boy_app/screen/order_detail_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:delivery_boy_app/utils/order_search.dart';
+import 'package:delivery_boy_app/utils/phone.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -821,9 +822,12 @@ class _OrderListCard extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            if (order.customerPhone.trim().isNotEmpty)
+                            // Without the +961 a store may have saved: the
+                            // driver is in Lebanon and knows it — see
+                            // displayPhone. Calling still uses the raw number.
+                            if (displayPhone(order.customerPhone).isNotEmpty)
                               Text(
-                                order.customerPhone.trim(),
+                                displayPhone(order.customerPhone),
                                 style: const TextStyle(
                                   color: Colors.black38,
                                   fontSize: 12,
@@ -1138,9 +1142,10 @@ class _CompletedOrderCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      if (order.customerPhone.trim().isNotEmpty)
+                      // Shown without its country code, as on the card above.
+                      if (displayPhone(order.customerPhone).isNotEmpty)
                         Text(
-                          order.customerPhone.trim(),
+                          displayPhone(order.customerPhone),
                           style: const TextStyle(
                             fontSize: 12,
                             color: Colors.black38,

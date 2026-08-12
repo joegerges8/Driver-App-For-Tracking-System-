@@ -4,6 +4,7 @@ import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/route.dart';
 import 'package:delivery_boy_app/screen/order_detail_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
+import 'package:delivery_boy_app/utils/phone.dart';
 import 'package:delivery_boy_app/utils/utils.dart';
 import 'package:delivery_boy_app/widgets/custom_button.dart';
 import 'package:flutter/material.dart';
@@ -142,7 +143,9 @@ class OrderCard extends StatelessWidget {
     String subtitle,
     String phone,
   ) {
-    final phoneText = phone.trim();
+    // Without the +961 a store may have saved — see displayPhone. The raw
+    // number is what the detail screen dials; this is only how it reads.
+    final phoneText = displayPhone(phone);
 
     return Expanded(
       child: Column(

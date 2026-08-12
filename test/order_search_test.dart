@@ -33,36 +33,8 @@ void main() {
     });
   });
 
-  group('normalizePhone', () {
-    // The point of the whole exercise: the same line saved four ways by four
-    // stores has to come out as one string.
-    test('reduces every way a number is written to the same digits', () {
-      expect(normalizePhone('+96170218542'), '70218542');
-      expect(normalizePhone('+961 70 218 542'), '70218542');
-      expect(normalizePhone('0096170218542'), '70218542');
-      expect(normalizePhone('96170218542'), '70218542');
-      expect(normalizePhone('70218542'), '70218542');
-    });
-
-    test('drops the trunk zero the local form carries', () {
-      expect(normalizePhone('03123456'), '3123456');
-      expect(normalizePhone('+96103123456'), '3123456');
-      expect(normalizePhone('03 123 456'), '3123456');
-    });
-
-    test('drops dashes, brackets and other formatting', () {
-      expect(normalizePhone('(+961) 70-218-542'), '70218542');
-    });
-
-    // A driver part-way through '+961...' has not typed a search yet, and the
-    // screen must not empty the list under them.
-    test('is empty for a country code on its own', () {
-      expect(normalizePhone('+961'), '');
-      expect(normalizePhone('00961'), '');
-      expect(normalizePhone('+'), '');
-      expect(normalizePhone(''), '');
-    });
-  });
+  // normalizePhone itself is covered in test/phone_test.dart, alongside the
+  // display shape that shares its rules.
 
   group('phoneMatches', () {
     // The behaviour the driver was promised: type the number, no +961.
