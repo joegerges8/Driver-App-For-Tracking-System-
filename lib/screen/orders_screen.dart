@@ -24,9 +24,11 @@
 //  6. Area filter   — chips above the tabs narrow every tab to one delivery
 //                     area (Beirut, Metn, Keserwan, ...). Replaced an earlier
 //                     per-city filter; see _AreaFilterBar for why.
-//  7. Order search  — a field above the tabs that finds one order by its
-//                     number, typed without the '#', and opens the tab that
-//                     order is on. See _OrderSearchField and _jumpToMatchingTab.
+//  7. Order search  — a field above the tabs that finds one order by the
+//                     customer's phone number — typed without the +961,
+//                     whichever way the order stored it — or by its order
+//                     number, and opens the tab that order is on. See
+//                     _OrderSearchField and _jumpToMatchingTab.
 
 import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/models/order_model.dart';
@@ -61,9 +63,9 @@ class _OrdersScreenState extends State<OrdersScreen>
   // Controls the three tabs: All, Returned, Done.
   late TabController _tabController;
 
-  // What the driver has typed into the order-number search field, exactly as
-  // typed. Normalising happens at comparison time so the field itself never
-  // rewrites what someone is in the middle of typing.
+  // What the driver has typed into the search field, exactly as typed.
+  // Normalising happens at comparison time so the field itself never rewrites
+  // what someone is in the middle of typing.
   final TextEditingController _searchController = TextEditingController();
   String _searchText = '';
 
@@ -191,12 +193,13 @@ class _OrdersScreenState extends State<OrdersScreen>
     return orders.where((o) => o.area == selected).toList();
   }
 
-  // The search as it will actually be compared — '#', spaces and case removed.
-  // Empty when the field is empty or holds only punctuation, which every reader
-  // below treats as "no search running".
-  String get _query => normalizeOrderQuery(_searchText);
+  // The search as it is shown back to the driver — what they typed, trimmed.
+  // Comparison uses the raw text; the matchers normalise both sides themselves.
+  String get _query => _searchText.trim();
 
-  bool get _isSearching => _query.isNotEmpty;
+  // A field holding only '#', spaces or the first half of a country code is
+  // not a search yet — see isSearchActive — and the list stays whole.
+  bool get _isSearching => isSearchActive(_searchText);
 
   // What a tab shows: the searched order, or the area-filtered list.
   //
@@ -209,7 +212,13 @@ class _OrdersScreenState extends State<OrdersScreen>
   List<OrderModel> _visible(List<OrderModel> orders) {
     if (_isSearching) {
       return orders
-          .where((o) => orderNumberMatches(o.orderNumber, _query))
+          .where(
+            (o) => orderMatchesSearch(
+              phone: o.customerPhone,
+              orderNumber: o.orderNumber,
+              query: _searchText,
+            ),
+          )
           .toList();
     }
 
@@ -235,12 +244,16 @@ class _OrdersScreenState extends State<OrdersScreen>
   // '2' still matches half the All tab and stays put, while the full 2693 that
   // only matches a delivered order opens Completed.
   void _jumpToMatchingTab(String text) {
-    final query = normalizeOrderQuery(text);
-    if (query.isEmpty) return;
+    if (!isSearchActive(text)) return;
 
     final lists = _tabLists(context.read<DeliveryProvider>());
-    bool holdsMatch(List<OrderModel> orders) =>
-        orders.any((o) => orderNumberMatches(o.orderNumber, query));
+    bool holdsMatch(List<OrderModel> orders) => orders.any(
+          (o) => orderMatchesSearch(
+            phone: o.customerPhone,
+            orderNumber: o.orderNumber,
+            query: text,
+          ),
+        );
 
     // Never move a driver off a tab that already answers their search: having
     // opened Completed to look through delivered orders is a choice, and the
@@ -377,8 +390,8 @@ class _OrdersScreenState extends State<OrdersScreen>
     final returnedTab = _visible(delivery.returnedOrders);
     final completedTab = _visible(delivery.todaysCompletedOrders);
 
-    // While a search is running the tabs show whatever matched the number, so
-    // the empty state says so rather than claiming the driver has no orders.
+    // While a search is running the tabs show whatever matched what was typed,
+    // so the empty state says so rather than claiming the driver has no orders.
     String emptyMessage(String whenBrowsing) =>
         _isSearching ? l10n.noOrderMatching(_query) : whenBrowsing;
 
@@ -443,15 +456,17 @@ class _OrdersScreenState extends State<OrdersScreen>
 
 // ──────────────────────── Order Search Field ──────────────────────────────
 //
-// Finds one order by its number. A driver on the phone with a customer is told
-// "order 2693" and types exactly that: no '#', no "order", no case to get
-// right — orderNumberMatches strips all of it before comparing.
+// Finds one order by the customer's phone number, or by its order number if
+// that is what the driver has. A driver calling a customer back types the
+// number as they know it — no '+961' whether or not the order was saved with
+// one, no '#', no case to get right — and the matchers strip all of it before
+// comparing. See normalizePhone for why the country code cannot be required.
 //
-// The keyboard is the numeric one because every order number in the list is a
-// number, and a driver holding a phone in one hand at a gate should not have to
-// hunt for digits on a letter keyboard. Nothing is lost for a store whose
-// numbers carry a prefix ('EN2693'): matching is on any part of the number, so
-// the digits alone still find it.
+// The keyboard is the phone one because both kinds of number are digits, and a
+// driver holding a phone in one hand at a gate should not have to hunt for
+// them on a letter keyboard. Nothing is lost for a store whose order numbers
+// carry a prefix ('EN2693'): matching is on any part of the number, so the
+// digits alone still find it.
 
 class _OrderSearchField extends StatelessWidget {
   final TextEditingController controller;
@@ -470,7 +485,11 @@ class _OrderSearchField extends StatelessWidget {
       child: TextField(
         controller: controller,
         onChanged: onChanged,
-        keyboardType: TextInputType.number,
+        // Phone rather than number: the driver may still type a leading '+',
+        // and the phone keypad is the one they are used to for a number like
+        // this. Neither the '+' nor the country code is required — see
+        // normalizePhone — but typing it must not be made impossible.
+        keyboardType: TextInputType.phone,
         textInputAction: TextInputAction.search,
         style: const TextStyle(fontSize: 14),
         // An order number reads left to right in every language — 2693 is 2693
@@ -489,7 +508,7 @@ class _OrderSearchField extends StatelessWidget {
         // the mixed-direction line — and the bug — back.
         textAlign: isRtl ? TextAlign.right : TextAlign.left,
         decoration: InputDecoration(
-          hintText: context.l10n.searchOrderNumber,
+          hintText: context.l10n.searchPhoneNumber,
           hintStyle: const TextStyle(color: Colors.black38, fontSize: 14),
           // The hint is a sentence in the app's own language, so it follows the
           // app's direction rather than the number's — otherwise the Arabic
