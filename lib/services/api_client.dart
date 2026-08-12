@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:delivery_boy_app/services/api_config.dart';
@@ -29,27 +30,46 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 class ApiClient {
   static Uri _uri(String path) => Uri.parse('${ApiConfig.baseUrl}$path');
 
+  // How long any one request is given before it is called a failure.
+  //
+  // The http package sets no deadline of its own, so a request whose
+  // connection dies without being closed — a phone going into a lift, or being
+  // put away with a request in flight — never completes and never throws. The
+  // callers are written around requests that finish one way or the other: the
+  // order poll waits on one before starting the next, so a single hung request
+  // stopped the driver's list refreshing until the app was restarted. Twenty
+  // seconds is far longer than any of these endpoints needs and short enough
+  // that the driver is told rather than left waiting.
+  static const Duration _timeout = Duration(seconds: 20);
+
+  // Runs a request under that deadline and turns anything that goes wrong at
+  // the network layer into an ApiException the caller can show.
+  static Future<http.Response> _send(Future<http.Response> request) async {
+    try {
+      return await request.timeout(_timeout);
+    } on TimeoutException {
+      throw ApiException('Network timed out — check your connection');
+    } catch (e) {
+      throw ApiException('Network error: $e');
+    }
+  }
+
   static Future<Map<String, dynamic>> signupDriver({
     required String fullName,
     required String email,
     required String phone,
     required String password,
   }) async {
-    http.Response res;
-    try {
-      res = await http.post(
-        _uri('/api/drivers/signup'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'full_name': fullName,
-          'email': email,
-          'phone': phone,
-          'password': password,
-        }),
-      );
-    } catch (e) {
-      throw ApiException('Network error: $e');
-    }
+    final res = await _send(http.post(
+      _uri('/api/drivers/signup'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'full_name': fullName,
+        'email': email,
+        'phone': phone,
+        'password': password,
+      }),
+    ));
 
     final body = _decodeJson(res);
     if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -63,19 +83,14 @@ class ApiClient {
     required String email,
     required String password,
   }) async {
-    http.Response res;
-    try {
-      res = await http.post(
-        _uri('/api/drivers/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-          'password': password,
-        }),
-      );
-    } catch (e) {
-      throw ApiException('Network error: $e');
-    }
+    final res = await _send(http.post(
+      _uri('/api/drivers/login'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'email': email,
+        'password': password,
+      }),
+    ));
 
     final body = _decodeJson(res);
     if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -102,22 +117,17 @@ class ApiClient {
     required String currentPassword,
     required String newPassword,
   }) async {
-    http.Response res;
-    try {
-      res = await http.post(
-        _uri('/api/drivers/me/password'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'current_password': currentPassword,
-          'new_password': newPassword,
-        }),
-      );
-    } catch (e) {
-      throw ApiException('Network error: $e');
-    }
+    final res = await _send(http.post(
+      _uri('/api/drivers/me/password'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'current_password': currentPassword,
+        'new_password': newPassword,
+      }),
+    ));
 
     if (res.statusCode >= 200 && res.statusCode < 300) return;
 
@@ -132,18 +142,13 @@ class ApiClient {
   }
 
   static Future<Map<String, dynamic>> getMe({required String token}) async {
-    http.Response res;
-    try {
-      res = await http.get(
-        _uri('/api/drivers/me'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
-    } catch (e) {
-      throw ApiException('Network error: $e');
-    }
+    final res = await _send(http.get(
+      _uri('/api/drivers/me'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+    ));
 
     final body = _decodeJson(res);
     if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -160,18 +165,13 @@ class ApiClient {
   // unnecessary network request on every app start.
   // Returns an empty list (not an error) if the driver has no completed orders yet.
   static Future<List<dynamic>> getCompletedOrders({required String token}) async {
-    http.Response res;
-    try {
-      res = await http.get(
-        _uri('/api/drivers/me/orders/completed'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
-    } catch (e) {
-      throw ApiException('Network error: $e');
-    }
+    final res = await _send(http.get(
+      _uri('/api/drivers/me/orders/completed'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+    ));
 
     final decoded = _decodeJsonAny(res);
     if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -195,14 +195,14 @@ class ApiClient {
     required double longitude,
   }) async {
     try {
-      await http.post(
+      await _send(http.post(
         _uri('/api/drivers/me/orders/$orderId/location'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
         body: jsonEncode({'latitude': latitude, 'longitude': longitude}),
-      );
+      ));
     } catch (_) {
       // Silent — never interrupt the driver's map experience over a ping failure.
     }
@@ -213,19 +213,14 @@ class ApiClient {
     required String orderId,
     required String status,
   }) async {
-    http.Response res;
-    try {
-      res = await http.patch(
-        _uri('/api/drivers/me/orders/$orderId/status'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({'status': status}),
-      );
-    } catch (e) {
-      throw ApiException('Network error: $e');
-    }
+    final res = await _send(http.patch(
+      _uri('/api/drivers/me/orders/$orderId/status'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'status': status}),
+    ));
 
     if (res.statusCode >= 200 && res.statusCode < 300) return;
 
@@ -244,19 +239,14 @@ class ApiClient {
     required String orderId,
     required String note,
   }) async {
-    http.Response res;
-    try {
-      res = await http.patch(
-        _uri('/api/drivers/me/orders/$orderId/note'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({'note': note}),
-      );
-    } catch (e) {
-      throw ApiException('Network error: $e');
-    }
+    final res = await _send(http.patch(
+      _uri('/api/drivers/me/orders/$orderId/note'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'note': note}),
+    ));
 
     if (res.statusCode >= 200 && res.statusCode < 300) return;
 
@@ -269,18 +259,13 @@ class ApiClient {
   }
 
   static Future<List<dynamic>> getMyOrders({required String token}) async {
-    http.Response res;
-    try {
-      res = await http.get(
-        _uri('/api/drivers/me/orders'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
-    } catch (e) {
-      throw ApiException('Network error: $e');
-    }
+    final res = await _send(http.get(
+      _uri('/api/drivers/me/orders'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+    ));
 
     final decoded = _decodeJsonAny(res);
     if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -310,12 +295,7 @@ class ApiClient {
       'key': apiKey,
     });
 
-    http.Response res;
-    try {
-      res = await http.get(uri);
-    } catch (e) {
-      throw ApiException('Network error: $e');
-    }
+    final res = await _send(http.get(uri));
 
     final body = _decodeJson(res);
     final googleStatus = body['status'] as String? ?? '';
@@ -348,25 +328,20 @@ class ApiClient {
     required LatLng origin,
     required LatLng destination,
   }) async {
-    http.Response res;
-    try {
-      final u = _uri('/api/maps/directions').replace(queryParameters: {
-        'originLat': origin.latitude.toString(),
-        'originLng': origin.longitude.toString(),
-        'destLat': destination.latitude.toString(),
-        'destLng': destination.longitude.toString(),
-      });
+    final u = _uri('/api/maps/directions').replace(queryParameters: {
+      'originLat': origin.latitude.toString(),
+      'originLng': origin.longitude.toString(),
+      'destLat': destination.latitude.toString(),
+      'destLng': destination.longitude.toString(),
+    });
 
-      res = await http.get(
-        u,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
-    } catch (e) {
-      throw ApiException('Network error: $e');
-    }
+    final res = await _send(http.get(
+    u,
+    headers: {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    },
+    ));
 
     final body = _decodeJson(res);
     if (res.statusCode >= 200 && res.statusCode < 300) {
