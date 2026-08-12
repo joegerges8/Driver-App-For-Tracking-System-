@@ -5,20 +5,18 @@
 // the following improvements:
 //
 //  1. Tab bar       — four filter tabs: All, Pending, Active, Done.
-//  2. Earnings strip— a red banner that shows total earnings and completed
-//                     order count, calculated from the Done tab's data.
-//  3. Card layout   — each order is shown as an elevated card instead of a
+//  2. Card layout   — each order is shown as an elevated card instead of a
 //                     plain ListTile, with pickup/delivery addresses and a
 //                     colour-coded status badge (orange = Pending, green = Active).
-//  4. Skeleton loading — pulsing grey placeholder cards are shown while data
+//  3. Skeleton loading — pulsing grey placeholder cards are shown while data
 //                     loads, instead of a plain spinner.
-//  5. Empty states  — each tab shows a context-aware icon and message when empty.
-//  6. Done tab      — read-only green cards for completed deliveries, loaded
+//  4. Empty states  — each tab shows a context-aware icon and message when empty.
+//  5. Done tab      — read-only green cards for completed deliveries, loaded
 //                     lazily when the driver first opens that tab.
-//  7. Area filter   — chips above the tabs narrow every tab to one delivery
+//  6. Area filter   — chips above the tabs narrow every tab to one delivery
 //                     area (Beirut, Metn, Keserwan, ...). Replaced an earlier
 //                     per-city filter; see _AreaFilterBar for why.
-//  8. Order search  — a field above the tabs that finds one order by its
+//  7. Order search  — a field above the tabs that finds one order by its
 //                     number, typed without the '#', and opens the tab that
 //                     order is on. See _OrderSearchField and _jumpToMatchingTab.
 
@@ -30,7 +28,6 @@ import 'package:delivery_boy_app/route.dart';
 import 'package:delivery_boy_app/screen/order_detail_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:delivery_boy_app/utils/order_search.dart';
-import 'package:delivery_boy_app/widgets/driver_pay_row.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -110,11 +107,11 @@ class _OrdersScreenState extends State<OrdersScreen>
     final delivery = context.read<DeliveryProvider>();
     delivery.refreshMyOrders(token: token);
 
-    // The banner above the tabs reports Completed and Your Earnings out of the
-    // completed list, which otherwise only loads when the Done tab is opened —
-    // so a driver who never opened that tab read $0 for work they had done.
-    // Silent, so the Done tab keeps ownership of its own skeleton and error
-    // states and this fetch cannot flash either of them on arrival.
+    // The Completed tab's label carries a count out of the completed list,
+    // which otherwise only loads when that tab is opened — so a driver who
+    // never opened it read (0) for work they had done. Silent, so the Done tab
+    // keeps ownership of its own skeleton and error states and this fetch
+    // cannot flash either of them on arrival.
     delivery.refreshCompletedOrders(token: token, silent: true);
   }
 
@@ -254,11 +251,6 @@ class _OrdersScreenState extends State<OrdersScreen>
     final l10n = context.l10n;
     final delivery = context.watch<DeliveryProvider>();
 
-    // Determine whether any order is being actively delivered. The driver can
-    // be carrying several at once, so this is a count, not a single order.
-    final activeIds = delivery.activeOrderIds;
-    final isActive = activeIds.isNotEmpty;
-
     // Pending tab: all orders except the ones currently being delivered.
     final pendingOrders = _pendingFrom(delivery);
 
@@ -322,7 +314,7 @@ class _OrdersScreenState extends State<OrdersScreen>
                   );
                 }
               },
-              child: _buildBody(context, delivery, pendingOrders, isActive),
+              child: _buildBody(context, delivery, pendingOrders),
             ),
           ),
         ],
@@ -335,7 +327,6 @@ class _OrdersScreenState extends State<OrdersScreen>
     BuildContext context,
     DeliveryProvider delivery,
     List<OrderModel> pendingOrders,
-    bool isActive,
   ) {
     final l10n = context.l10n;
 
@@ -395,13 +386,9 @@ class _OrdersScreenState extends State<OrdersScreen>
         ? null
         : (foundSomewhere ? l10n.tryOtherTabs : l10n.orderNotInYourList);
 
-    // Main layout: earnings strip, area filter, then the four tab views.
+    // Main layout: area filter, then the four tab views.
     return Column(
       children: [
-        _EarningsSummaryStrip(
-          completedOrders: delivery.completedOrders,
-          isActive: isActive,
-        ),
         // Hidden during a search, which ignores the area filter — see _visible.
         if (areas.isNotEmpty && !_isSearching)
           _AreaFilterBar(
@@ -445,141 +432,6 @@ class _OrdersScreenState extends State<OrdersScreen>
                 emptyHint: emptyHint,
               ),
             ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ──────────────────────── Earnings Summary Strip ───────────────────────────
-//
-// A red banner pinned above the tab views that shows:
-//   - Total Earned: the cash collected across completed orders. Orders the
-//     customer paid online count as 0 — the driver never handled that money,
-//     so including it would count the same payment twice.
-//   - Completed:    how many orders have been marked as delivered.
-//   - "In Progress" pill: shown only when a delivery is currently active.
-//   - Your Earnings: the delivery fees the store owes the driver — a flat
-//     amount per completed order, prepaid ones included, since the fee is for
-//     making the delivery and not for carrying the cash.
-//
-// The values are derived from completedOrders (fetched from the Done tab
-// endpoint), so the strip accurately reflects real delivered orders rather
-// than just assigned ones.
-
-class _EarningsSummaryStrip extends StatelessWidget {
-  final List<OrderModel> completedOrders;
-  final bool isActive;
-
-  const _EarningsSummaryStrip({
-    required this.completedOrders,
-    required this.isActive,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Sum what the driver actually collected. Orders the customer had already
-    // paid online contribute 0 — see OrderModel.earnedPrice.
-    final total = completedOrders.fold<int>(0, (sum, o) => sum + o.earnedPrice);
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      decoration: BoxDecoration(
-        color: buttonMainColor,
-        boxShadow: [
-          BoxShadow(
-            color: buttonMainColor.withValues(alpha: 0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              _StatColumn(label: context.l10n.totalEarned, value: '\$$total'),
-              const Spacer(),
-              _StatColumn(
-                label: context.l10n.completed,
-                value: '${completedOrders.length}',
-              ),
-              // The "In Progress" pill is conditionally shown only when the
-              // driver has accepted an order and is currently on the way.
-              if (isActive) ...[
-                const SizedBox(width: 16),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white24,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.local_shipping,
-                        color: Colors.white,
-                        size: 13,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        context.l10n.inProgress,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ),
-
-          // What the store owes the driver for those deliveries, under the
-          // cash they collected for the store. Counts every completed order
-          // rather than the area-filtered ones, matching the Completed figure
-          // it sits under — the Shipment tab is where the driver breaks the
-          // same total down by day, week or month.
-          const SizedBox(height: 12),
-          const Divider(color: Colors.white24, height: 1, thickness: 1),
-          const SizedBox(height: 10),
-          DriverPayRow(count: completedOrders.length),
-        ],
-      ),
-    );
-  }
-}
-
-// A small column showing a label above a large value, used inside the
-// earnings strip for "Total Earned" and "Completed".
-class _StatColumn extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _StatColumn({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white70, fontSize: 11),
-        ),
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
           ),
         ),
       ],
