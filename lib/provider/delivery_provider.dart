@@ -34,6 +34,7 @@ import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/services/api_client.dart';
 import 'package:delivery_boy_app/services/background_location_service.dart';
 import 'package:delivery_boy_app/utils/delivery_day.dart';
+import 'package:delivery_boy_app/utils/order_sort.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
@@ -154,7 +155,20 @@ class DeliveryProvider extends ChangeNotifier {
   /// of them later than a driver carrying one.
   int get activeDeliveryCount => activeOrderIds.length;
 
-  List<OrderModel> get orders => List.unmodifiable(_orders);
+  /// The driver's assigned orders, deliveries under way first.
+  ///
+  /// Both screens that show this list read it from here — the swipeable cards
+  /// on the home screen and the All tab on the orders screen — so the orders
+  /// the driver has set off with are at the top of both. See sortActiveFirst
+  /// for why they are lifted and why nothing else moves.
+  ///
+  /// Sorted on the way out rather than in place: _orders is rebuilt from the
+  /// backend's answer on every refresh, and the code that reapplies delivery
+  /// state onto it works by matching ids, so there is nothing to gain from
+  /// keeping the stored list in this order and one more thing to keep true.
+  List<OrderModel> get orders => List.unmodifiable(
+        sortActiveFirst(_orders, isActive: (o) => isDelivering(o.id)),
+      );
   bool get isLoadingOrders => _isLoadingOrders;
   String? get ordersError => _ordersError;
   List<OrderModel> get completedOrders => List.unmodifiable(_completedOrders);
