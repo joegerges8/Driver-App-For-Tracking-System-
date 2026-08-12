@@ -97,10 +97,11 @@ class AppLocalizations {
   String get yourEarnings => _t('yourEarnings');
   String get filterAll => _t('filterAll');
   String get areaOther => _t('areaOther');
-  // Hint inside the order-number search field on the Orders tab.
-  String get searchOrderNumber => _t('searchOrderNumber');
-  // Empty state while a search is running. The query is already stripped of its
-  // '#' by the search itself, so the '#' in the sentence is the only one.
+  // Hint inside the search field on the Orders tab. The example is a phone
+  // number without its +961, since that is what a driver types.
+  String get searchPhoneNumber => _t('searchPhoneNumber');
+  // Empty state while a search is running. The query may be a phone number or
+  // an order number, so the sentence names neither.
   String noOrderMatching(String query) =>
       _t('noOrderMatching').replaceFirst('{n}', query);
   // Sits under the message above when the order is on a tab the driver has
@@ -254,8 +255,8 @@ class AppLocalizations {
     'yourEarnings': 'Your Earnings',
     'filterAll': 'All',
     'areaOther': 'Other',
-    'searchOrderNumber': 'Search order number, e.g. 2693',
-    'noOrderMatching': 'No order #{n} here',
+    'searchPhoneNumber': 'Search phone number, e.g. 70218542',
+    'noOrderMatching': 'No order matching {n} here',
     'tryOtherTabs': 'Check the other tabs',
     'orderNotInYourList': 'This order is not in your list',
     'noOrdersAssigned': 'No orders assigned yet',
@@ -379,8 +380,8 @@ class AppLocalizations {
     'yourEarnings': 'أرباحك',
     'filterAll': 'الكل',
     'areaOther': 'أخرى',
-    'searchOrderNumber': 'ابحث برقم الطلب، مثال 2693',
-    'noOrderMatching': 'لا يوجد طلب رقم {n} هنا',
+    'searchPhoneNumber': 'ابحث برقم الهاتف، مثال 70218542',
+    'noOrderMatching': 'لا يوجد طلب مطابق لـ {n} هنا',
     'tryOtherTabs': 'تحقّق من التبويبات الأخرى',
     'orderNotInYourList': 'هذا الطلب ليس في قائمتك',
     'noOrdersAssigned': 'لا توجد طلبات مسندة بعد',
