@@ -8,7 +8,7 @@
 // It manages:
 //   - The list of assigned (pending) orders from the backend.
 //   - The list of completed (delivered) orders from a separate endpoint.
-//   - The list of returned orders.
+//   - The list of returned orders, from a third endpoint.
 //   - The current order being delivered and its delivery status.
 //
 // Delivery flow (deliberately kept as simple as possible):
@@ -89,8 +89,25 @@ class DeliveryProvider extends ChangeNotifier {
   bool _isPolling = false;
 
   // ── Returned orders ───────────────────────────────────────────────────────
-  // Orders the driver explicitly marked as returned.
-  final List<OrderModel> _returnedOrders = [];
+  // Orders the driver marked as returned, fetched from
+  // GET /api/drivers/me/orders/returned.
+  //
+  // This list used to be built up in memory only. A returned order is closed on
+  // the backend, so it is absent from the assigned list and is not delivered
+  // either — nothing read it back, and closing the app emptied the Returned tab
+  // even though the return itself had been recorded.
+  List<OrderModel> _returnedOrders = [];
+  bool _isLoadingReturned = false;
+  String? _returnedError;
+
+  // Orders this device marked RETURNED whose PATCH has not been acknowledged by
+  // the backend yet. Only these survive a returned-orders fetch that comes back
+  // without them — the same protection _unsyncedCompletedIds gives the Done tab.
+  final Set<String> _unsyncedReturnedIds = {};
+
+  // True once the Returned tab has loaded at least once, so the background poll
+  // knows whether keeping that list fresh is worth a request.
+  bool _returnedLoadedOnce = false;
 
   // Orders this device has just sent back out — a returned order the driver
   // tapped "Start Delivery" on again — whose re-opening PATCH the backend has
@@ -143,6 +160,8 @@ class DeliveryProvider extends ChangeNotifier {
   bool get isLoadingCompleted => _isLoadingCompleted;
   String? get completedError => _completedError;
   List<OrderModel> get returnedOrders => List.unmodifiable(_returnedOrders);
+  bool get isLoadingReturned => _isLoadingReturned;
+  String? get returnedError => _returnedError;
 
   // Creates a copy of an order with updated pickup location fields.
   // OrderModel is immutable (all fields are final), so we must create a new
@@ -470,6 +489,75 @@ class DeliveryProvider extends ChangeNotifier {
     }
   }
 
+  // Fetches the orders this driver brought back, from
+  // GET /api/drivers/me/orders/returned. This is what makes the Returned tab
+  // survive the app being closed and reopened.
+  Future<void> refreshReturnedOrders({
+    required String token,
+    bool silent = false,
+  }) async {
+    if (!silent) {
+      _isLoadingReturned = true;
+      _returnedError = null;
+      notifyListeners();
+    }
+
+    try {
+      final list = await ApiClient.getReturnedOrders(token: token);
+      final parsed = <OrderModel>[];
+      for (final item in list) {
+        if (item is Map<String, dynamic>) {
+          final order = OrderModel.fromBackend(item);
+          // An order the driver has just taken back out is still RETURNED on the
+          // backend until its re-opening PATCH lands. Putting it back in the
+          // Returned tab in the meantime would pull the delivery the driver just
+          // started out from under them.
+          if (_reopeningIds.contains(order.id)) continue;
+          parsed.add(order);
+        }
+      }
+
+      // Merge on the same terms as the Done tab: keep an order this device just
+      // returned whose PATCH is still in flight, because the answer was written
+      // before it landed. Anything else the backend leaves out is genuinely no
+      // longer returned — sent back out, or deleted from the dashboard — so it
+      // leaves the tab too.
+      final fetchedIds = parsed.map((o) => o.id).toSet();
+      _returnedOrders = [
+        ...parsed,
+        ..._returnedOrders.where(
+          (o) =>
+              !fetchedIds.contains(o.id) && _unsyncedReturnedIds.contains(o.id),
+        ),
+      ];
+      _returnedLoadedOnce = true;
+
+      // A returned order is not a delivered one. If the backend now calls it
+      // returned, a stale copy in the Done tab would show it in both at once —
+      // the mirror of what refreshCompletedOrders does for this list.
+      _completedOrders =
+          _completedOrders.where((o) => !fetchedIds.contains(o.id)).toList();
+
+      // It is closed on the backend, so it has no business sitting in the
+      // assigned list either. Closing it here also stops its GPS stream, which
+      // matters when the return was recorded elsewhere — on another device, or
+      // by the dispatcher — and this app never saw it happen.
+      final nowReturned =
+          _orders.where((o) => fetchedIds.contains(o.id)).toList();
+      for (final order in nowReturned) {
+        _finishOrder(order.id, DeliveryStatus.returned);
+      }
+      _orders.removeWhere((o) => fetchedIds.contains(o.id));
+      _returnedError = null;
+    } catch (e) {
+      if (silent) return;
+      _returnedError = e.toString();
+    } finally {
+      _isLoadingReturned = false;
+      notifyListeners();
+    }
+  }
+
   // ── Auto-refresh ──────────────────────────────────────────────────────────
 
   /// Starts re-fetching orders every [pollInterval] while the app is in the
@@ -514,6 +602,9 @@ class DeliveryProvider extends ChangeNotifier {
       // Only worth a request once the driver has actually opened the Done tab.
       if (_completedLoadedOnce) {
         await refreshCompletedOrders(token: token, silent: true);
+      }
+      if (_returnedLoadedOnce) {
+        await refreshReturnedOrders(token: token, silent: true);
       }
     } finally {
       _isPolling = false;
@@ -603,7 +694,8 @@ class DeliveryProvider extends ChangeNotifier {
       _orders[index] = started;
     } else {
       _orders.insert(0, started);
-      _returnedOrders.removeWhere((o) => o.id == order.id);
+      _returnedOrders = _returnedOrders.where((o) => o.id != order.id).toList();
+      _unsyncedReturnedIds.remove(order.id);
       _completedOrders =
           _completedOrders.where((o) => o.id != order.id).toList();
     }
@@ -735,14 +827,18 @@ class DeliveryProvider extends ChangeNotifier {
     final orderId = _currentOrder?.id;
     completeReturn(); // instant UI update — moves the order to the Returned tab
     if (orderId == null || orderId.isEmpty) return;
+    // Marked until the backend confirms: this is what protects the order from
+    // being dropped by a returned-orders fetch that raced the PATCH.
+    _unsyncedReturnedIds.add(orderId);
     try {
       await ApiClient.updateOrderStatus(
         token: token,
         orderId: orderId,
         status: 'RETURNED',
       );
+      _unsyncedReturnedIds.remove(orderId);
     } catch (e) {
-      rethrow; // caller shows error snackbar
+      rethrow; // caller shows error snackbar; the id stays marked unsynced
     }
   }
 
@@ -763,10 +859,10 @@ class DeliveryProvider extends ChangeNotifier {
       _orders.removeWhere((o) => o.id == _currentOrder!.id);
 
       // An order can be returned and then sent out again later. Drop it from
-      // the Returned tab, otherwise it sits in both tabs at once — and because
-      // the returned list only lives in memory, that only came right after a
-      // restart wiped it.
-      _returnedOrders.removeWhere((o) => o.id == _currentOrder!.id);
+      // the Returned tab, otherwise it sits in both tabs at once.
+      _returnedOrders =
+          _returnedOrders.where((o) => o.id != _currentOrder!.id).toList();
+      _unsyncedReturnedIds.remove(_currentOrder!.id);
 
       // Add the paid copy to the front of the completed list so it appears
       // immediately at the top of the "Done" tab without a refetch.

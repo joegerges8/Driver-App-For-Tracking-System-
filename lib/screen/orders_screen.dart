@@ -86,16 +86,21 @@ class _OrdersScreenState extends State<OrdersScreen>
   }
 
   // Called every time the selected tab changes.
-  // We only fetch completed orders when the Done tab (index 2) is opened,
-  // and only when the tab has finished animating (indexIsChanging == false).
-  // This is called "lazy loading" — we avoid an unnecessary API call until
-  // the data is actually needed.
+  // Opening the Returned (index 1) or Done (index 2) tab refetches that tab's
+  // list, and only once the tab has finished animating
+  // (indexIsChanging == false). Both lists come from their own endpoint, so
+  // this keeps whichever one the driver is looking at up to date.
   void _onTabChanged() {
-    if (_tabController.index == 2 && !_tabController.indexIsChanging) {
-      final token = context.read<AuthProvider>().token;
-      if (token != null && token.isNotEmpty) {
-        context.read<DeliveryProvider>().refreshCompletedOrders(token: token);
-      }
+    if (_tabController.indexIsChanging) return;
+
+    final token = context.read<AuthProvider>().token;
+    if (token == null || token.isEmpty) return;
+    final delivery = context.read<DeliveryProvider>();
+
+    if (_tabController.index == 1) {
+      delivery.refreshReturnedOrders(token: token);
+    } else if (_tabController.index == 2) {
+      delivery.refreshCompletedOrders(token: token);
     }
   }
 
@@ -116,6 +121,13 @@ class _OrdersScreenState extends State<OrdersScreen>
     // keeps ownership of its own skeleton and error states and this fetch
     // cannot flash either of them on arrival.
     delivery.refreshCompletedOrders(token: token, silent: true);
+
+    // The Returned tab is fetched on startup for the same reason, and for one
+    // more: it is the only thing that puts a returned order back on screen
+    // after the app has been closed. Waiting for the driver to open the tab
+    // would show them an empty Returned list — which is exactly what the tab
+    // looked like before it had an endpoint to read from at all.
+    delivery.refreshReturnedOrders(token: token, silent: true);
   }
 
   @override
@@ -300,10 +312,15 @@ class _OrdersScreenState extends State<OrdersScreen>
             child: RefreshIndicator(
               onRefresh: () async {
                 final token = context.read<AuthProvider>().token;
-                if (token != null && token.isNotEmpty) {
-                  await context.read<DeliveryProvider>().refreshMyOrders(
-                    token: token,
-                  );
+                if (token == null || token.isEmpty) return;
+                final delivery = context.read<DeliveryProvider>();
+                await delivery.refreshMyOrders(token: token);
+                // Pulling down on the Returned or Done tab has to refresh the
+                // list being pulled, not just the assigned one behind it.
+                if (_tabController.index == 1) {
+                  await delivery.refreshReturnedOrders(token: token);
+                } else if (_tabController.index == 2) {
+                  await delivery.refreshCompletedOrders(token: token);
                 }
               },
               child: _buildBody(context, delivery),

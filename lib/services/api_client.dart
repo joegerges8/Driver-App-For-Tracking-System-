@@ -24,6 +24,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 //   GET  /api/drivers/me
 //   GET  /api/drivers/me/orders                    — active assigned orders
 //   GET  /api/drivers/me/orders/completed          — completed (delivered) orders
+//   GET  /api/drivers/me/orders/returned           — returned orders
 //   POST /api/drivers/me/orders/:id/location       — GPS ping for customer tracking
 //   PATCH /api/drivers/me/orders/:id/note          — save the driver's own note
 //   GET  /api/maps/directions                      — route between two coordinates
@@ -182,6 +183,34 @@ class ApiClient {
     final body = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
     throw ApiException(
       _errorMessage(body) ?? 'Failed to fetch completed orders (HTTP ${res.statusCode})',
+    );
+  }
+
+  // Fetches the orders this driver brought back (RETURNED) from
+  // GET /api/drivers/me/orders/returned.
+  //
+  // The Returned tab used to be kept in memory only, so closing the app emptied
+  // it. This is where it is read back from.
+  //
+  // Returns an empty list (not an error) if the driver has returned nothing.
+  static Future<List<dynamic>> getReturnedOrders({required String token}) async {
+    final res = await _send(http.get(
+      _uri('/api/drivers/me/orders/returned'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+    ));
+
+    final decoded = _decodeJsonAny(res);
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      if (decoded is List) return decoded;
+      return [];
+    }
+
+    final body = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+    throw ApiException(
+      _errorMessage(body) ?? 'Failed to fetch returned orders (HTTP ${res.statusCode})',
     );
   }
 
