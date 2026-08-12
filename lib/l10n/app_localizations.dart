@@ -89,15 +89,12 @@ class AppLocalizations {
   // ── Orders ────────────────────────────────────────────────────────────────
   String get myOrders => _t('myOrders');
   String tabAll(int count) => '${_t('tabAll')} ($count)';
-  String tabPending(int count) => '${_t('tabPending')} ($count)';
   String tabReturned(int count) => '${_t('tabReturned')} ($count)';
   String tabCompleted(int count) => '${_t('tabCompleted')} ($count)';
   String get totalEarned => _t('totalEarned');
   // The driver's own pay — the delivery fees owed to them — as opposed to
   // totalEarned above, which is the store's cash they collected at the door.
   String get yourEarnings => _t('yourEarnings');
-  String get completed => _t('completed');
-  String get inProgress => _t('inProgress');
   String get filterAll => _t('filterAll');
   String get areaOther => _t('areaOther');
   // Hint inside the order-number search field on the Orders tab.
@@ -110,10 +107,9 @@ class AppLocalizations {
   // since moved away from by hand — the search itself opens the right one.
   String get tryOtherTabs => _t('tryOtherTabs');
   // Sits there instead when the number matched nothing on any tab, so the
-  // driver is not sent hunting through four empty ones.
+  // driver is not sent hunting through three empty ones.
   String get orderNotInYourList => _t('orderNotInYourList');
   String get noOrdersAssigned => _t('noOrdersAssigned');
-  String get noPendingOrders => _t('noPendingOrders');
   String get noReturnedOrders => _t('noReturnedOrders');
   String get noDeliveriesToday => _t('noDeliveriesToday');
   String get completedWillAppearHere => _t('completedWillAppearHere');
@@ -252,13 +248,10 @@ class AppLocalizations {
 
     'myOrders': 'My Orders',
     'tabAll': 'All',
-    'tabPending': 'Pending',
     'tabReturned': 'Returned',
     'tabCompleted': 'Completed',
     'totalEarned': 'Total Earned',
     'yourEarnings': 'Your Earnings',
-    'completed': 'Completed',
-    'inProgress': 'In Progress',
     'filterAll': 'All',
     'areaOther': 'Other',
     'searchOrderNumber': 'Search order number, e.g. 2693',
@@ -266,7 +259,6 @@ class AppLocalizations {
     'tryOtherTabs': 'Check the other tabs',
     'orderNotInYourList': 'This order is not in your list',
     'noOrdersAssigned': 'No orders assigned yet',
-    'noPendingOrders': 'No pending orders',
     'noReturnedOrders': 'No returned orders',
     'noDeliveriesToday': 'No deliveries completed today',
     'completedWillAppearHere': 'Completed deliveries will appear here',
@@ -381,13 +373,10 @@ class AppLocalizations {
 
     'myOrders': 'طلباتي',
     'tabAll': 'الكل',
-    'tabPending': 'قيد الانتظار',
     'tabReturned': 'مرتجعة',
     'tabCompleted': 'مكتملة',
     'totalEarned': 'إجمالي الأرباح',
     'yourEarnings': 'أرباحك',
-    'completed': 'المكتملة',
-    'inProgress': 'قيد التنفيذ',
     'filterAll': 'الكل',
     'areaOther': 'أخرى',
     'searchOrderNumber': 'ابحث برقم الطلب، مثال 2693',
@@ -395,7 +384,6 @@ class AppLocalizations {
     'tryOtherTabs': 'تحقّق من التبويبات الأخرى',
     'orderNotInYourList': 'هذا الطلب ليس في قائمتك',
     'noOrdersAssigned': 'لا توجد طلبات مسندة بعد',
-    'noPendingOrders': 'لا توجد طلبات قيد الانتظار',
     'noReturnedOrders': 'لا توجد طلبات مرتجعة',
     'noDeliveriesToday': 'لم تكتمل أي توصيلة اليوم',
     'completedWillAppearHere': 'ستظهر التوصيلات المكتملة هنا',

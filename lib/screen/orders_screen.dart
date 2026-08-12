@@ -4,7 +4,10 @@
 // It was redesigned from a plain list to a tabbed, card-based interface with
 // the following improvements:
 //
-//  1. Tab bar       — four filter tabs: All, Pending, Active, Done.
+//  1. Tab bar       — three filter tabs: All, Returned, Done. A Pending tab
+//                     used to sit between All and Returned; it repeated the
+//                     All tab minus the deliveries already under way, which
+//                     the per-card status badge already tells the driver.
 //  2. Card layout   — each order is shown as an elevated card instead of a
 //                     plain ListTile, with pickup/delivery addresses and a
 //                     colour-coded status badge (orange = Pending, green = Active).
@@ -50,7 +53,7 @@ class _OrdersScreenState extends State<OrdersScreen>
   // API once per session rather than on every widget rebuild.
   String? _lastFetchToken;
 
-  // Controls the four tabs: All, Pending, Active, Done.
+  // Controls the three tabs: All, Returned, Done.
   late TabController _tabController;
 
   // What the driver has typed into the order-number search field, exactly as
@@ -62,7 +65,7 @@ class _OrdersScreenState extends State<OrdersScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
 
     // Listen for tab changes so we can lazily load completed orders only
     // when the driver actually opens the Done tab.
@@ -83,12 +86,12 @@ class _OrdersScreenState extends State<OrdersScreen>
   }
 
   // Called every time the selected tab changes.
-  // We only fetch completed orders when the Done tab (index 3) is opened,
+  // We only fetch completed orders when the Done tab (index 2) is opened,
   // and only when the tab has finished animating (indexIsChanging == false).
   // This is called "lazy loading" — we avoid an unnecessary API call until
   // the data is actually needed.
   void _onTabChanged() {
-    if (_tabController.index == 3 && !_tabController.indexIsChanging) {
+    if (_tabController.index == 2 && !_tabController.indexIsChanging) {
       final token = context.read<AuthProvider>().token;
       if (token != null && token.isNotEmpty) {
         context.read<DeliveryProvider>().refreshCompletedOrders(token: token);
@@ -125,7 +128,7 @@ class _OrdersScreenState extends State<OrdersScreen>
 
   // Currently selected delivery area, or null for "All". Lives on the screen
   // rather than inside one tab so the same filter applies everywhere — picking
-  // Keserwan narrows All, Pending, Returned and Completed at once.
+  // Keserwan narrows All, Returned and Completed at once.
   String? _selectedArea;
 
   // The areas actually present in the driver's orders, sorted, with the
@@ -196,17 +199,10 @@ class _OrdersScreenState extends State<OrdersScreen>
     return _filterByArea(orders);
   }
 
-  // Orders not currently being delivered — what the Pending tab holds.
-  List<OrderModel> _pendingFrom(DeliveryProvider delivery) {
-    final activeIds = delivery.activeOrderIds;
-    return delivery.orders.where((o) => !activeIds.contains(o.id)).toList();
-  }
-
-  // The four lists in tab order, so the search can reason about the tab bar
+  // The three lists in tab order, so the search can reason about the tab bar
   // without repeating which tab shows what.
   List<List<OrderModel>> _tabLists(DeliveryProvider delivery) => [
     delivery.orders,
-    _pendingFrom(delivery),
     delivery.returnedOrders,
     delivery.completedOrders,
   ];
@@ -251,9 +247,6 @@ class _OrdersScreenState extends State<OrdersScreen>
     final l10n = context.l10n;
     final delivery = context.watch<DeliveryProvider>();
 
-    // Pending tab: all orders except the ones currently being delivered.
-    final pendingOrders = _pendingFrom(delivery);
-
     return Scaffold(
       backgroundColor: backgroundColor,
       appBar: AppBar(
@@ -274,10 +267,9 @@ class _OrdersScreenState extends State<OrdersScreen>
           tabAlignment: TabAlignment.start,
           // The counts follow the search as well as the area filter, so a
           // driver searching 2693 reads which tab the order is sitting in
-          // instead of having to open all four looking for it.
+          // instead of having to open all three looking for it.
           tabs: [
             Tab(text: l10n.tabAll(_visible(delivery.orders).length)),
-            Tab(text: l10n.tabPending(_visible(pendingOrders).length)),
             Tab(
               text: l10n.tabReturned(
                 _visible(delivery.returnedOrders).length,
@@ -314,7 +306,7 @@ class _OrdersScreenState extends State<OrdersScreen>
                   );
                 }
               },
-              child: _buildBody(context, delivery, pendingOrders),
+              child: _buildBody(context, delivery),
             ),
           ),
         ],
@@ -323,11 +315,7 @@ class _OrdersScreenState extends State<OrdersScreen>
   }
 
   // Decides what to show in the body based on the current loading/error state.
-  Widget _buildBody(
-    BuildContext context,
-    DeliveryProvider delivery,
-    List<OrderModel> pendingOrders,
-  ) {
+  Widget _buildBody(BuildContext context, DeliveryProvider delivery) {
     final l10n = context.l10n;
 
     // Show skeleton cards while the initial fetch is in progress.
@@ -353,18 +341,16 @@ class _OrdersScreenState extends State<OrdersScreen>
       );
     }
 
-    // Every area present across all four lists, so switching tabs never makes
+    // Every area present across all three lists, so switching tabs never makes
     // the chip you selected disappear from the bar.
     final areas = _areasIn([
       delivery.orders,
-      pendingOrders,
       delivery.returnedOrders,
       delivery.completedOrders,
     ]);
 
     // What each tab shows, narrowed by the search or the area chips.
     final allTab = _visible(delivery.orders);
-    final pendingTab = _visible(pendingOrders);
     final returnedTab = _visible(delivery.returnedOrders);
     final completedTab = _visible(delivery.completedOrders);
 
@@ -375,18 +361,17 @@ class _OrdersScreenState extends State<OrdersScreen>
 
     // Typing a number opens the tab holding it, so an empty tab during a search
     // usually means the number is on no tab at all — and telling that driver to
-    // keep looking would send them through four empty tabs. Only when the order
-    // is genuinely elsewhere, which is a driver who moved tabs by hand after
-    // the search landed, is that the advice worth giving.
+    // keep looking would send them through three empty tabs. Only when the
+    // order is genuinely elsewhere, which is a driver who moved tabs by hand
+    // after the search landed, is that the advice worth giving.
     final bool foundSomewhere = allTab.isNotEmpty ||
-        pendingTab.isNotEmpty ||
         returnedTab.isNotEmpty ||
         completedTab.isNotEmpty;
     final String? emptyHint = !_isSearching
         ? null
         : (foundSomewhere ? l10n.tryOtherTabs : l10n.orderNotInYourList);
 
-    // Main layout: area filter, then the four tab views.
+    // Main layout: area filter, then the three tab views.
     return Column(
       children: [
         // Hidden during a search, which ignores the area filter — see _visible.
@@ -410,12 +395,6 @@ class _OrdersScreenState extends State<OrdersScreen>
               _OrderList(
                 orders: allTab,
                 emptyMessage: emptyMessage(l10n.noOrdersAssigned),
-                emptyHint: emptyHint,
-              ),
-              // Pending tab — orders not started yet.
-              _OrderList(
-                orders: pendingTab,
-                emptyMessage: emptyMessage(l10n.noPendingOrders),
                 emptyHint: emptyHint,
               ),
               // Returned tab — orders the driver marked as returned.
