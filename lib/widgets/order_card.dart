@@ -111,6 +111,7 @@ class OrderCard extends StatelessWidget {
                     l10n.deliveryLabel,
                     order.deliveryAddress,
                     order.customerName,
+                    order.customerPhone,
                   ),
                 ],
               ),
@@ -135,7 +136,14 @@ class OrderCard extends StatelessWidget {
     );
   }
 
-  Expanded _locationInfo(String title, String address, String subtitle) {
+  Expanded _locationInfo(
+    String title,
+    String address,
+    String subtitle,
+    String phone,
+  ) {
+    final phoneText = phone.trim();
+
     return Expanded(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -169,6 +177,15 @@ class OrderCard extends StatelessWidget {
             ],
           ),
           Text(subtitle, style: const TextStyle(color: Colors.black38)),
+          if (phoneText.isNotEmpty)
+            Text(
+              phoneText,
+              style: const TextStyle(
+                color: Colors.black38,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
         ],
       ),
     );

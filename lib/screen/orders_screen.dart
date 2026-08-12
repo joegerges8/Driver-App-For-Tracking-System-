@@ -936,7 +936,7 @@ class _OrderListCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  // ── Footer: customer name + price + arrow ────────────
+                  // ── Footer: customer name/phone + price + arrow ───────
                   Row(
                     children: [
                       const Icon(
@@ -945,14 +945,34 @@ class _OrderListCard extends StatelessWidget {
                         color: Colors.black45,
                       ),
                       const SizedBox(width: 4),
-                      Text(
-                        order.customerName,
-                        style: const TextStyle(
-                          color: Colors.black54,
-                          fontSize: 13,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              order.customerName,
+                              style: const TextStyle(
+                                color: Colors.black54,
+                                fontSize: 13,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (order.customerPhone.trim().isNotEmpty)
+                              Text(
+                                order.customerPhone.trim(),
+                                style: const TextStyle(
+                                  color: Colors.black38,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                          ],
                         ),
                       ),
-                      const Spacer(),
+                      const SizedBox(width: 12),
                       // The order's own value, not an earning — the delivery
                       // hasn't happened yet. Prepaid orders are flagged so the
                       // driver knows there is no cash to collect on arrival.
@@ -1175,7 +1195,7 @@ class _CompletedOrderCard extends StatelessWidget {
               ],
             ),
           ),
-          // Compact body row: delivery address, customer name, price.
+          // Compact body row: delivery address, customer name/phone, price.
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
             child: Row(
@@ -1201,9 +1221,32 @@ class _CompletedOrderCard extends StatelessWidget {
                   color: Colors.black45,
                 ),
                 const SizedBox(width: 4),
-                Text(
-                  order.customerName,
-                  style: const TextStyle(fontSize: 13, color: Colors.black54),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        order.customerName,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Colors.black54,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (order.customerPhone.trim().isNotEmpty)
+                        Text(
+                          order.customerPhone.trim(),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.black38,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
                 ),
                 const SizedBox(width: 12),
                 // Mirrors the earnings strip: a prepaid order earned nothing,
