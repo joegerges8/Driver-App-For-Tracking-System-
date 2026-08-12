@@ -3,6 +3,7 @@ import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
+import 'package:delivery_boy_app/utils/delivery_day.dart';
 import 'package:delivery_boy_app/widgets/driver_pay_row.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -41,24 +42,29 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
     context.read<DeliveryProvider>().refreshCompletedOrders(token: token);
   }
 
-  // Returns the start of the window for the selected period (UTC-normalised).
-  DateTime _periodStart(DateTime now) {
-    final today = DateUtils.dateOnly(now);
+  // Returns the start of the window for the selected period, on the driver's
+  // own clock — the same day boundary the Done tab resets on.
+  DateTime _periodStart() {
+    final start = driverToday();
     switch (_period) {
       case 'Week':
-        return today.subtract(Duration(days: today.weekday - 1));
+        return start.subtract(Duration(days: start.weekday - 1));
       case 'Month':
-        return DateTime(today.year, today.month, 1);
+        return DateTime(start.year, start.month, 1);
       default: // 'Day'
-        return today;
+        return start;
     }
   }
 
   // Orders that fall within the selected period.
+  //
+  // An order with no completion time is one from a backend predating the
+  // delivered_at column; it is counted in whatever period is on screen rather
+  // than being dropped from the history altogether.
   List<OrderModel> _filtered(List<OrderModel> all) {
-    final start = _periodStart(DateTime.now());
+    final start = _periodStart();
     return all.where((o) {
-      final date = DateUtils.dateOnly(o.deliveredAt ?? DateTime.now());
+      final date = deliveryDayOf(o) ?? driverToday();
       return !date.isBefore(start);
     }).toList();
   }
@@ -70,13 +76,12 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
     List<OrderModel> all,
   ) {
     final l10n = context.l10n;
-    final now = DateTime.now();
-    final today = DateUtils.dateOnly(now);
-    final yesterday = today.subtract(const Duration(days: 1));
+    final currentDay = driverToday();
+    final yesterday = currentDay.subtract(const Duration(days: 1));
 
     final Map<DateTime, List<OrderModel>> map = {};
     for (final o in all) {
-      final key = DateUtils.dateOnly(o.deliveredAt ?? now);
+      final key = deliveryDayOf(o) ?? currentDay;
       map.putIfAbsent(key, () => []).add(o);
     }
 
@@ -84,7 +89,7 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
 
     return sorted.map((date) {
       String label;
-      if (date == today) {
+      if (date == currentDay) {
         label = l10n.today;
       } else if (date == yesterday) {
         label = l10n.yesterday;

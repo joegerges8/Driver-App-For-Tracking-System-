@@ -161,6 +161,7 @@ class OrderModel {
     String? pickupAddress,
     String? driverNote,
     bool? isPaid,
+    DateTime? deliveredAt,
   }) {
     return OrderModel(
       id: id,
@@ -184,7 +185,11 @@ class OrderModel {
       // during the delivery may change it — that is the distinction the
       // earnings totals rely on. It is deliberately not a parameter here.
       isPrepaid: isPrepaid,
-      deliveredAt: deliveredAt,
+      // The moment the delivery was completed. Passed in when the driver marks
+      // an order delivered on this phone, so the finished order carries a
+      // completion time before the backend has confirmed one — that timestamp
+      // is what puts it in today's Done tab and takes it back out at midnight.
+      deliveredAt: deliveredAt ?? this.deliveredAt,
       orderStatus: orderStatus,
     );
   }

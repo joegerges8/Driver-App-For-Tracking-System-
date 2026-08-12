@@ -33,6 +33,7 @@ import 'dart:async';
 import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/services/api_client.dart';
 import 'package:delivery_boy_app/services/background_location_service.dart';
+import 'package:delivery_boy_app/utils/delivery_day.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
@@ -157,6 +158,24 @@ class DeliveryProvider extends ChangeNotifier {
   bool get isLoadingOrders => _isLoadingOrders;
   String? get ordersError => _ordersError;
   List<OrderModel> get completedOrders => List.unmodifiable(_completedOrders);
+
+  /// The deliveries finished today, in the driver's own timezone.
+  ///
+  /// This is what the Done tab shows. The tab is a record of the day's run
+  /// rather than of everything the driver has ever delivered: it fills up over
+  /// the day and is empty again after midnight, so a driver counting what they
+  /// delivered is counting today's work and nothing else.
+  ///
+  /// The full list is deliberately left alone — the Shipment screen reads it
+  /// for its Day/Week/Month history, which only means anything if the older
+  /// days are still there.
+  ///
+  /// Nothing needs to fire at midnight for the tab to empty. The list is
+  /// filtered as it is read, and the background poll rebuilds the screen every
+  /// [pollInterval] while the app is in the foreground, so the last of
+  /// yesterday's cards leaves within half a minute of the day turning over.
+  List<OrderModel> get todaysCompletedOrders =>
+      List.unmodifiable(_completedOrders.where(isDeliveredToday));
   bool get isLoadingCompleted => _isLoadingCompleted;
   String? get completedError => _completedError;
   List<OrderModel> get returnedOrders => List.unmodifiable(_returnedOrders);
@@ -177,15 +196,22 @@ class DeliveryProvider extends ChangeNotifier {
     );
   }
 
-  // Returns a copy of the given order with isPaid set to true.
-  // This is used when the driver completes a COD delivery — at that moment
-  // cash has been collected, so we flip the financial status to paid.
+  // Returns a copy of the given order recorded as delivered: paid, and stamped
+  // with the moment it finished.
   //
-  // isPrepaid is deliberately left alone: it describes how the order arrived,
-  // so collecting the cash on delivery must not change it — that is exactly
-  // the distinction the earnings totals rely on.
-  OrderModel _withPaid(OrderModel order) {
-    return order.copyWith(isPaid: true);
+  // The payment flip is for a COD delivery — at that moment cash has been
+  // collected, so the financial status becomes paid. isPrepaid is deliberately
+  // left alone: it describes how the order arrived, so collecting the cash on
+  // delivery must not change it — that is exactly the distinction the earnings
+  // totals rely on.
+  //
+  // The timestamp is what dates the order to today's run. The backend stamps
+  // its own delivered_at and that is the one that survives the next fetch, but
+  // until the PATCH lands this copy is all the app has, and an order with no
+  // completion time belongs to no day at all — the driver would tap "Mark as
+  // Delivered" and watch the order leave the Done tab it had just entered.
+  OrderModel _withDeliveryRecorded(OrderModel order) {
+    return order.copyWith(isPaid: true, deliveredAt: DateTime.now());
   }
 
   // Fetches the list of assigned (non-delivered) orders for this driver
@@ -853,7 +879,7 @@ class DeliveryProvider extends ChangeNotifier {
       // "Paid" the instant they tap "Mark as Delivered", without having to wait
       // for the network round-trip to finish. If the API call later fails, the
       // caller (order_detail_screen) shows an error snackbar.
-      final paidOrder = _withPaid(_currentOrder!);
+      final paidOrder = _withDeliveryRecorded(_currentOrder!);
 
       // Remove the order from the active/pending list now that it is done.
       _orders.removeWhere((o) => o.id == _currentOrder!.id);

@@ -14,8 +14,13 @@
 //  3. Skeleton loading — pulsing grey placeholder cards are shown while data
 //                     loads, instead of a plain spinner.
 //  4. Empty states  — each tab shows a context-aware icon and message when empty.
-//  5. Done tab      — read-only green cards for completed deliveries, loaded
-//                     lazily when the driver first opens that tab.
+//  5. Done tab      — read-only green cards for the deliveries completed
+//                     today, loaded lazily when the driver first opens that
+//                     tab. It is the day's run, not a permanent archive: the
+//                     list starts empty each midnight, so what it holds is
+//                     always what the driver delivered today. Older
+//                     deliveries are not lost — the Shipment screen keeps the
+//                     full history, by day, week and month.
 //  6. Area filter   — chips above the tabs narrow every tab to one delivery
 //                     area (Beirut, Metn, Keserwan, ...). Replaced an earlier
 //                     per-city filter; see _AreaFilterBar for why.
@@ -216,7 +221,7 @@ class _OrdersScreenState extends State<OrdersScreen>
   List<List<OrderModel>> _tabLists(DeliveryProvider delivery) => [
     delivery.orders,
     delivery.returnedOrders,
-    delivery.completedOrders,
+    delivery.todaysCompletedOrders,
   ];
 
   // Opens the tab the searched order is actually sitting on.
@@ -289,7 +294,7 @@ class _OrdersScreenState extends State<OrdersScreen>
             ),
             Tab(
               text: l10n.tabCompleted(
-                _visible(delivery.completedOrders).length,
+                _visible(delivery.todaysCompletedOrders).length,
               ),
             ),
           ],
@@ -363,13 +368,14 @@ class _OrdersScreenState extends State<OrdersScreen>
     final areas = _areasIn([
       delivery.orders,
       delivery.returnedOrders,
-      delivery.completedOrders,
+      delivery.todaysCompletedOrders,
     ]);
 
-    // What each tab shows, narrowed by the search or the area chips.
+    // What each tab shows, narrowed by the search or the area chips. The Done
+    // tab is scoped to today's deliveries — see todaysCompletedOrders.
     final allTab = _visible(delivery.orders);
     final returnedTab = _visible(delivery.returnedOrders);
-    final completedTab = _visible(delivery.completedOrders);
+    final completedTab = _visible(delivery.todaysCompletedOrders);
 
     // While a search is running the tabs show whatever matched the number, so
     // the empty state says so rather than claiming the driver has no orders.
@@ -937,9 +943,11 @@ class _OrderTitle extends StatelessWidget {
 
 // ──────────────────────── Completed Order List (Done tab) ─────────────────
 //
-// Shows orders whose status is "DELIVERED" in the database. These are fetched
-// from a separate backend endpoint (GET /api/drivers/me/orders/completed) and
-// loaded lazily — only when the driver first opens the Done tab.
+// Shows the orders this driver delivered today. These are fetched from a
+// separate backend endpoint (GET /api/drivers/me/orders/completed), which
+// answers with the driver's recent deliveries, and narrowed to today's by
+// DeliveryProvider.todaysCompletedOrders — that is what empties this tab at
+// midnight. Loaded lazily, only when the driver first opens the tab.
 // Completed orders are read-only.
 
 class _CompletedOrderList extends StatelessWidget {
