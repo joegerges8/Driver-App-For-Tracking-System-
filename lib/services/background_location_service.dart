@@ -24,20 +24,28 @@ const _orderIdsKey = 'bg_active_order_ids';
 // going dark, then cleared.
 const _legacyOrderIdKey = 'bg_active_order_id';
 
-// Every order still assigned to this driver and not finished, refreshed by the
-// service on its own timer so it holds true while the app is merely put away
-// and the screen-bound polling in DeliveryProvider has stopped.
+// Every order this driver may still be pinging for: the ones awaiting action,
+// plus the ones this phone has actually started, whatever state those are in.
+// Refreshed by the service on its own timer so it holds true while the app is
+// merely put away and the screen-bound polling in DeliveryProvider has stopped.
 //
-// Anything absent from it has been delivered, returned, cancelled or taken
-// away, and must stop being pinged for even if this phone started it. It is a
-// stop condition only — it never starts a delivery. What starts one is the
-// driver tapping "Start Delivery", and nothing else.
+// Anything absent from it has been delivered, cancelled or taken away, and
+// must stop being pinged for even if this phone started it. It is a stop
+// condition only — it never starts a delivery. What starts one is the driver
+// tapping "Start Delivery", and nothing else.
 const _backendOpenKey = 'bg_backend_open_ids';
 
 // Shared with the rest of the app so a --dart-define pointing at a staging
 // backend reaches the background isolate too, instead of it quietly carrying
 // on posting to production.
 String get _baseUrl => ApiConfig.baseUrl;
+
+// How long any one request from the service may take. The isolate ticks every
+// 15 seconds whatever happens, so a request left unbounded does not delay the
+// next tick — it just accumulates, one stuck socket per tick, for as long as
+// the driver is out of coverage. Ten seconds ends each attempt before the tick
+// after it makes another.
+const _pingTimeout = Duration(seconds: 10);
 
 // The foreground-service notification, cut down to the least Android will
 // accept. GPS that survives the app being backgrounded or force-killed has to
@@ -84,9 +92,14 @@ Future<List<String>> _readActiveOrderIds(SharedPreferences prefs) async {
 /// long as the app is open and never reaches a customer.)
 ///
 /// One thing stops them, and it overrules the tap: the backend no longer
-/// listing the order as open. That is what stops a delivered or returned
+/// listing the order as open. That is what stops a delivered or cancelled
 /// delivery from streaming on — this phone's memory of having started it is
 /// not evidence that it is still going.
+///
+/// A returned order is not one of those endings. The driver can take one back
+/// out, and the open list is built to say so: it is asked about the orders
+/// this phone has started, by id, and answers for them whatever status they
+/// carry.
 ///
 /// The backend's list is only applied once it has actually been fetched. Until
 /// then — first run, or offline since launch — a started delivery keeps
@@ -211,8 +224,14 @@ class BackgroundLocationService {
 
   /// The orders currently being tracked. Used on app start to restore the
   /// in-progress deliveries after the app was killed mid-run.
+  ///
+  /// Reloads first: the background isolate strikes orders off this list when
+  /// the backend 404s them, and it writes to its own copy of the preferences.
+  /// Without the reload the UI would restore a delivery the service had
+  /// already established was gone.
   static Future<List<String>> activeOrderIds() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     return _readActiveOrderIds(prefs);
   }
 
@@ -314,7 +333,7 @@ void _onStart(ServiceInstance service) async {
               'latitude': position.latitude,
               'longitude': position.longitude,
             }),
-          ),
+          ).timeout(_pingTimeout),
         ),
       );
 
@@ -360,7 +379,7 @@ Future<void> _postDriverLocation(String token, Position position) async {
         'latitude': position.latitude,
         'longitude': position.longitude,
       }),
-    );
+    ).timeout(_pingTimeout);
   } catch (_) {
     // Silent — a missed dispatcher update is acceptable.
   }
@@ -379,10 +398,20 @@ Future<void> _refreshBackendOrders(
   String token,
 ) async {
   try {
-    final response = await http.get(
-      Uri.parse('$_baseUrl/api/drivers/me/orders'),
-      headers: {'Authorization': 'Bearer $token'},
+    // Ask about the orders this phone has started as well as the ones still
+    // awaiting action. Without the ids, an order the driver is carrying whose
+    // status has gone terminal — a returned order taken back out — is simply
+    // absent from the answer, and since tracking is "started AND open" its GPS
+    // would stop on the next tick while the driver is still on the road.
+    final started = await _readActiveOrderIds(prefs);
+    final uri = Uri.parse('$_baseUrl/api/drivers/me/orders').replace(
+      queryParameters: started.isEmpty ? null : {'carrying': started.join(',')},
     );
+
+    final response = await http.get(
+      uri,
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(_pingTimeout);
 
     if (response.statusCode != 200) return;
 
@@ -396,9 +425,14 @@ Future<void> _refreshBackendOrders(
       final id = item['id']?.toString();
       if (id == null || id.isEmpty) continue;
 
-      // The endpoint only returns orders that are still the driver's problem —
-      // delivered, returned and cancelled ones are already filtered out server
-      // side — so everything here is open by definition.
+      // The list is open by definition apart from the carried ids asked for
+      // above, which come back whatever state they are in. Of those, only the
+      // two that mean the delivery is over end the pings: DELIVERED, and
+      // CANCELLED. RETURNED does not — a driver who has started a returned
+      // order is out delivering it, and the customer's map has to follow.
+      final status = (item['order_status'] ?? '').toString().trim().toUpperCase();
+      if (status == 'DELIVERED' || status == 'CANCELLED') continue;
+
       open.add(id);
     }
 

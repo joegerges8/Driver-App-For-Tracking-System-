@@ -27,7 +27,36 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 //   PATCH /api/drivers/me/orders/:id/note          — save the driver's own note
 //   GET  /api/maps/directions                      — route between two coordinates
 class ApiClient {
-  static Uri _uri(String path) => Uri.parse('${ApiConfig.baseUrl}$path');
+  // How long any one request is given before it is treated as failed.
+  //
+  // Without this a request on a phone that has drifted out of coverage does
+  // not fail — it hangs, sometimes for the rest of the session. That is worse
+  // than a plain error here, because DeliveryProvider's background poll takes
+  // a "a fetch is already running" lock before each round: a request that
+  // never finishes never releases it, and the driver's order list quietly
+  // stops refreshing until the app is restarted. Ten seconds is long enough
+  // for a slow mobile connection and short enough that the next poll, thirty
+  // seconds later, gets a clean try.
+  static const Duration _requestTimeout = Duration(seconds: 10);
+
+  static Uri _uri(String path, {Map<String, String>? query}) {
+    final uri = Uri.parse('${ApiConfig.baseUrl}$path');
+    if (query == null || query.isEmpty) return uri;
+    return uri.replace(queryParameters: {...uri.queryParameters, ...query});
+  }
+
+  // A GET carrying the driver's token, bounded by _requestTimeout. The
+  // TimeoutException it throws is caught by the same handler as any other
+  // network failure at each call site.
+  static Future<http.Response> _get(Uri uri, {required String token}) {
+    return http.get(
+      uri,
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+    ).timeout(_requestTimeout);
+  }
 
   static Future<Map<String, dynamic>> signupDriver({
     required String fullName,
@@ -46,7 +75,7 @@ class ApiClient {
           'phone': phone,
           'password': password,
         }),
-      );
+      ).timeout(_requestTimeout);
     } catch (e) {
       throw ApiException('Network error: $e');
     }
@@ -72,7 +101,7 @@ class ApiClient {
           'email': email,
           'password': password,
         }),
-      );
+      ).timeout(_requestTimeout);
     } catch (e) {
       throw ApiException('Network error: $e');
     }
@@ -114,7 +143,7 @@ class ApiClient {
           'current_password': currentPassword,
           'new_password': newPassword,
         }),
-      );
+      ).timeout(_requestTimeout);
     } catch (e) {
       throw ApiException('Network error: $e');
     }
@@ -140,7 +169,7 @@ class ApiClient {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-      );
+      ).timeout(_requestTimeout);
     } catch (e) {
       throw ApiException('Network error: $e');
     }
@@ -168,7 +197,7 @@ class ApiClient {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-      );
+      ).timeout(_requestTimeout);
     } catch (e) {
       throw ApiException('Network error: $e');
     }
@@ -202,7 +231,7 @@ class ApiClient {
           'Content-Type': 'application/json',
         },
         body: jsonEncode({'latitude': latitude, 'longitude': longitude}),
-      );
+      ).timeout(_requestTimeout);
     } catch (_) {
       // Silent — never interrupt the driver's map experience over a ping failure.
     }
@@ -222,7 +251,7 @@ class ApiClient {
           'Content-Type': 'application/json',
         },
         body: jsonEncode({'status': status}),
-      );
+      ).timeout(_requestTimeout);
     } catch (e) {
       throw ApiException('Network error: $e');
     }
@@ -253,7 +282,7 @@ class ApiClient {
           'Content-Type': 'application/json',
         },
         body: jsonEncode({'note': note}),
-      );
+      ).timeout(_requestTimeout);
     } catch (e) {
       throw ApiException('Network error: $e');
     }
@@ -268,15 +297,27 @@ class ApiClient {
     throw ApiException(message ?? 'Failed to save note (HTTP ${res.statusCode})');
   }
 
-  static Future<List<dynamic>> getMyOrders({required String token}) async {
+  /// The driver's assigned orders.
+  ///
+  /// [carrying] is the set of orders this phone has out for delivery. The
+  /// backend returns those by id whatever their status, on top of the orders
+  /// still awaiting action — which is what lets the caller tell an order that
+  /// has been taken away (absent from the answer) from one whose status simply
+  /// went terminal while the driver is still carrying it.
+  static Future<List<dynamic>> getMyOrders({
+    required String token,
+    Iterable<String> carrying = const [],
+  }) async {
+    final ids = carrying.where((id) => id.isNotEmpty).toList();
+
     http.Response res;
     try {
-      res = await http.get(
-        _uri('/api/drivers/me/orders'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+      res = await _get(
+        _uri(
+          '/api/drivers/me/orders',
+          query: ids.isEmpty ? null : {'carrying': ids.join(',')},
+        ),
+        token: token,
       );
     } catch (e) {
       throw ApiException('Network error: $e');
@@ -312,7 +353,7 @@ class ApiClient {
 
     http.Response res;
     try {
-      res = await http.get(uri);
+      res = await http.get(uri).timeout(_requestTimeout);
     } catch (e) {
       throw ApiException('Network error: $e');
     }
@@ -363,7 +404,7 @@ class ApiClient {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-      );
+      ).timeout(_requestTimeout);
     } catch (e) {
       throw ApiException('Network error: $e');
     }

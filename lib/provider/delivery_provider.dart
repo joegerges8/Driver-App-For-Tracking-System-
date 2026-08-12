@@ -45,12 +45,73 @@ enum DeliveryStatus {
   returned, // Driver could not deliver and returned the order.
 }
 
+/// How this provider asks the backend what the driver is holding.
+///
+/// Named so the order-list fetch can be swapped in a test. Everything else
+/// about it matches ApiClient.getMyOrders, which is what it is in the app.
+typedef OrdersFetcher = Future<List<dynamic>> Function({
+  required String token,
+  Iterable<String> carrying,
+});
+
+/// The slice of the background location service this provider drives.
+///
+/// Location sharing runs in another isolate behind platform channels, which a
+/// unit test cannot reach — and the rules about which order keeps streaming
+/// GPS are exactly what the tests below need to check. This interface is the
+/// seam: in the app it is [_BackgroundServiceTracker], which forwards each
+/// call straight to BackgroundLocationService and adds nothing.
+abstract class DeliveryTracker {
+  Future<void> startTracking(String orderId);
+  Future<void> stopTrackingOrder(String orderId);
+  Future<void> publishBackendOrders({required Iterable<String> openOrderIds});
+  Future<List<String>> activeOrderIds();
+}
+
+class _BackgroundServiceTracker implements DeliveryTracker {
+  const _BackgroundServiceTracker();
+
+  @override
+  Future<void> startTracking(String orderId) =>
+      BackgroundLocationService.startTracking(orderId);
+
+  @override
+  Future<void> stopTrackingOrder(String orderId) =>
+      BackgroundLocationService.stopTrackingOrder(orderId);
+
+  @override
+  Future<void> publishBackendOrders({required Iterable<String> openOrderIds}) =>
+      BackgroundLocationService.publishBackendOrders(openOrderIds: openOrderIds);
+
+  @override
+  Future<List<String>> activeOrderIds() =>
+      BackgroundLocationService.activeOrderIds();
+}
+
 class DeliveryProvider extends ChangeNotifier {
+  DeliveryProvider({OrdersFetcher? fetchOrders, DeliveryTracker? tracker})
+      : _fetchOrders = fetchOrders ?? ApiClient.getMyOrders,
+        _tracker = tracker ?? const _BackgroundServiceTracker();
+
+  final OrdersFetcher _fetchOrders;
+  final DeliveryTracker _tracker;
+
   // ── Delivery state ────────────────────────────────────────────────────────
   // Status per order id. An order missing from this map has not been started.
   // Orders stay in here while they are being delivered and are removed once
   // they are delivered or returned.
   final Map<String, DeliveryStatus> _statusById = {};
+
+  // The order itself for everything in _statusById that is still being
+  // delivered, kept beside the status rather than looked up in _orders.
+  //
+  // A delivery under way has to survive a refresh that does not mention it, and
+  // the pending list is the wrong place to keep the only copy: an order can
+  // leave that list for reasons that have nothing to do with the driver — a
+  // returned order the driver is taking back out is not in it at all. Holding
+  // the order here is what lets every active delivery be treated the same way,
+  // instead of only the ones that happened to still be on a list somewhere.
+  final Map<String, OrderModel> _activeOrders = {};
 
   OrderModel? _currentOrder; // The order currently open on the detail screen.
 
@@ -175,30 +236,29 @@ class DeliveryProvider extends ChangeNotifier {
   }) async {
     await _restoreActiveDeliveries();
 
-    // Snapshot every in-progress delivery, not just the one on screen. Orders
-    // the driver is carrying must survive a refresh even if the backend list
-    // comes back without them.
-    final activeIds = activeOrderIds;
-    final activeOrdersById = {
-      for (final o in [..._orders, if (_currentOrder != null) _currentOrder!])
-        if (activeIds.contains(o.id)) o.id: o,
-    };
+    // Every delivery under way, asked about by id as well as by list. The
+    // backend answers for these whatever status they are in, which is what
+    // makes its silence about one of them mean something.
+    final carrying = activeOrderIds;
     final previousCurrentId = _currentOrder?.id;
 
     if (!silent) {
       _isLoadingOrders = true;
+      _markBusy();
       _ordersError = null;
       notifyListeners(); // Triggers skeleton loading UI.
     }
 
     try {
-      final list = await ApiClient.getMyOrders(token: token);
+      final list = await _fetchOrders(token: token, carrying: carrying);
       final parsed = <OrderModel>[];
       for (final item in list) {
         if (item is Map<String, dynamic>) {
           parsed.add(OrderModel.fromBackend(item));
         }
       }
+      final parsedById = {for (final o in parsed) o.id: o};
+
       // Filter out orders the driver has already finished locally. This prevents
       // a race condition where the PATCH request to mark an order DELIVERED or
       // RETURNED hasn't reached the server yet by the time refreshMyOrders runs,
@@ -207,11 +267,32 @@ class DeliveryProvider extends ChangeNotifier {
         ..._completedOrders.map((o) => o.id),
         ..._returnedOrders.map((o) => o.id),
       };
-      _orders = parsed.where((o) => !finishedIds.contains(o.id)).toList();
+
+      // The orders still awaiting action. Anything the driver asked about by id
+      // arrives here too, so the terminal ones are dropped: an order that is
+      // DELIVERED on the backend does not belong on the pending list, and one
+      // the driver is still carrying is put back by _reconcileActiveOrders.
+      _orders = [
+        for (final order in parsed)
+          if (!_isTerminal(order.orderStatus) && !finishedIds.contains(order.id))
+            order,
+      ];
 
       // Do not reset in-progress deliveries just because Home/Orders refreshed.
       // Keep the driver's local progress until each order is delivered or returned.
-      _reapplyActiveOrders(activeOrdersById, parsed.map((o) => o.id).toSet());
+      _reconcileActiveOrders(carrying, parsedById);
+
+      // A delivery the driver started while this request was in flight was not
+      // among the ids it asked about, so the answer says nothing either way
+      // about that one. Put it back on the list and leave it be; the next
+      // refresh asks about it properly.
+      for (final id in activeOrderIds) {
+        if (carrying.contains(id)) continue;
+        final held = _activeOrders[id];
+        if (held == null || _orders.any((o) => o.id == id)) continue;
+        _orders.insert(0, held);
+      }
+
       _publishBackendOrders(parsed);
       _currentOrder = _pickCurrentOrder(previousCurrentId);
       _ordersError = null;
@@ -221,10 +302,13 @@ class DeliveryProvider extends ChangeNotifier {
       if (silent) return;
 
       _ordersError = e.toString();
-      if (activeIds.isNotEmpty) {
+      if (carrying.isNotEmpty) {
         // Keep whatever the driver is carrying — a failed refresh must never
         // drop an in-progress delivery off the screen.
-        _orders = activeOrdersById.values.toList();
+        _orders = [
+          for (final id in carrying)
+            if (_activeOrders[id] != null) _activeOrders[id]!,
+        ];
         _currentOrder = _pickCurrentOrder(previousCurrentId);
       } else {
         _orders = [];
@@ -232,63 +316,104 @@ class DeliveryProvider extends ChangeNotifier {
       }
     } finally {
       _isLoadingOrders = false;
+      _clearBusy();
       notifyListeners(); // Triggers rebuild with real data or error message.
     }
   }
 
-  // Re-applies the driver's local delivery progress on top of a freshly
-  // fetched order list: orders being delivered keep the pickup point stamped
-  // when the driver set off.
-  //
-  // [liveIds] is every order id the backend just returned. An in-progress
-  // delivery missing from that answer is not a hiccup — the dispatcher deleted
-  // the order, cancelled it or handed it to someone else — so it is dropped
-  // and its GPS stream stopped rather than being pinned back onto the list.
-  // A request that failed outright never reaches here; that path still keeps
-  // whatever the driver was carrying.
-  void _reapplyActiveOrders(
-    Map<String, OrderModel> activeOrdersById,
-    Set<String> liveIds,
-  ) {
-    for (final entry in activeOrdersById.entries) {
-      final id = entry.key;
-      final held = entry.value;
+  // Statuses that mean the backend considers an order closed. RETURNED is one
+  // of them for the pending list, but deliberately not for a delivery already
+  // under way — see _reconcileActiveOrders.
+  static bool _isTerminal(String orderStatus) => const {
+    'DELIVERED',
+    'RETURNED',
+    'CANCELLED',
+  }.contains(orderStatus.trim().toUpperCase());
 
-      if (!liveIds.contains(id)) {
+  // Decides what happens to each delivery the driver has under way, now that
+  // the backend has answered about all of them by id.
+  //
+  // Every in-progress delivery goes through this, not just the ones that
+  // happen to still be on the pending list or open on screen. That used to be
+  // the rule, and it meant two orders started together were judged by
+  // different standards: whichever one was on screen was dropped back to
+  // pending on the next refresh, while the other stayed active — the app
+  // treating the same situation two ways depending on where the driver had
+  // navigated.
+  //
+  // [parsedById] is what the backend returned, including the carried ids it
+  // was asked about explicitly. So:
+  //   • absent      → the order is not this driver's any more: the dispatcher
+  //                   deleted it or handed it to someone else. Let it go, and
+  //                   stop its GPS.
+  //   • DELIVERED   → someone else closed it out (the dispatcher, or this
+  //     or CANCELLED  driver on another phone). Let it go too.
+  //   • anything    → the driver is carrying it. Keep it active and put it
+  //     else          back on the list, whatever the backend calls it.
+  //
+  // That last case is the one that matters for a returned order the driver has
+  // taken back out: it reads RETURNED on the backend and is still a delivery
+  // in progress, and only the driver finishing it ends it.
+  void _reconcileActiveOrders(
+    Set<String> carrying,
+    Map<String, OrderModel> parsedById,
+  ) {
+    for (final id in carrying) {
+      final live = parsedById[id];
+
+      if (live == null) {
         _forgetOrder(id);
         continue;
       }
 
-      final index = _orders.indexWhere((o) => o.id == id);
-      final base = index >= 0 ? _orders[index] : held;
-
-      final pickupLocation =
-          _pickupLocationById[id] ?? base.pickupLocation ?? held.pickupLocation;
-      final pickupAddress =
-          _pickupAddressById[id] ?? base.pickupAddress ?? held.pickupAddress;
-
-      final preserved = pickupLocation == null
-          ? base
-          : _withPickup(
-              base,
-              pickupLocation: pickupLocation,
-              pickupAddress: pickupAddress ?? 'Current location',
-            );
-
-      if (index >= 0) {
-        _orders[index] = preserved;
-      } else {
-        _orders.insert(0, preserved);
+      final status = live.orderStatus.trim().toUpperCase();
+      if (status == 'DELIVERED' || status == 'CANCELLED') {
+        _forgetOrder(id);
+        continue;
       }
+
+      _pinActiveOrder(live);
+    }
+  }
+
+  // Puts one in-progress delivery back onto the pending list with the pickup
+  // point stamped when the driver set off, and refreshes the copy held in
+  // _activeOrders so a later failed refresh still has something to show.
+  void _pinActiveOrder(OrderModel live) {
+    final id = live.id;
+
+    // Where the driver was when they tapped Start Delivery. The backend does
+    // not store it, so the copy that just arrived does not carry it and it has
+    // to be stamped back on from what this phone recorded. Missing only when
+    // the delivery was restored after the app was killed, in which case the
+    // order keeps whatever pickup point it arrived with.
+    final stamped = _pickupLocationById[id];
+    final preserved = stamped == null
+        ? live
+        : _withPickup(
+            live,
+            pickupLocation: stamped,
+            pickupAddress: _pickupAddressById[id] ?? 'Current location',
+          );
+
+    _activeOrders[id] = preserved;
+
+    final index = _orders.indexWhere((o) => o.id == id);
+    if (index >= 0) {
+      _orders[index] = preserved;
+    } else {
+      _orders.insert(0, preserved);
     }
   }
 
   // Tells the background service which orders the driver still holds.
   //
   // Only ever a stop condition. An order missing from this list has been
-  // delivered, returned, cancelled or taken away, and its GPS stream ends even
-  // if this phone started it — that is what stops a finished delivery from
-  // streaming on until the app is restarted.
+  // delivered, cancelled or taken away, and its GPS stream ends even if this
+  // phone started it — that is what stops a finished delivery from streaming
+  // on until the app is restarted. A returned order is not on that list of
+  // endings any more: the driver can take one back out, and while they are
+  // carrying it the customer's map has to keep following.
   //
   // Deliberately nothing here starts a delivery. The dispatcher marking an
   // order PICKED_UP moves the paperwork; it does not mean the driver has set
@@ -297,12 +422,21 @@ class DeliveryProvider extends ChangeNotifier {
   // Delivery". The service polls for the same list on its own timer; passing
   // it along here just gets the answer there a few seconds sooner.
   void _publishBackendOrders(List<OrderModel> parsed) {
-    final open = [
+    final open = <String>{
       for (final order in parsed)
         if (order.id.isNotEmpty) order.id,
-    ];
+    };
 
-    BackgroundLocationService.publishBackendOrders(openOrderIds: open);
+    // Plus whatever is still under way after the reconciliation above. Those
+    // ids have already survived it — an order the backend has taken away or
+    // closed out is no longer in activeOrderIds by this point — so this adds
+    // back only the deliveries a fetch that did not cover them would otherwise
+    // have silenced.
+    for (final id in activeOrderIds) {
+      if (id.isNotEmpty) open.add(id);
+    }
+
+    _tracker.publishBackendOrders(openOrderIds: open);
   }
 
   // Erases every trace of an order the backend no longer has: its local
@@ -311,11 +445,12 @@ class DeliveryProvider extends ChangeNotifier {
   // that this driver was carrying.
   void _forgetOrder(String orderId) {
     _statusById.remove(orderId);
+    _activeOrders.remove(orderId);
     _pickupLocationById.remove(orderId);
     _pickupAddressById.remove(orderId);
     _orders.removeWhere((o) => o.id == orderId);
     if (orderId.isNotEmpty) {
-      BackgroundLocationService.stopTrackingOrder(orderId);
+      _tracker.stopTrackingOrder(orderId);
     }
   }
 
@@ -361,7 +496,7 @@ class DeliveryProvider extends ChangeNotifier {
     _restoredActiveDeliveries = true;
 
     try {
-      final ids = await BackgroundLocationService.activeOrderIds();
+      final ids = await _tracker.activeOrderIds();
       for (final id in ids) {
         _statusById[id] = DeliveryStatus.delivering;
       }
@@ -380,6 +515,7 @@ class DeliveryProvider extends ChangeNotifier {
   }) async {
     if (!silent) {
       _isLoadingCompleted = true;
+      _markBusy();
       _completedError = null;
       notifyListeners();
     }
@@ -416,6 +552,7 @@ class DeliveryProvider extends ChangeNotifier {
       _completedError = e.toString();
     } finally {
       _isLoadingCompleted = false;
+      _clearBusy();
       notifyListeners();
     }
   }
@@ -444,12 +581,30 @@ class DeliveryProvider extends ChangeNotifier {
 
   // One silent round of polling. Skips itself while a fetch the driver asked
   // for is already running, so a pull-to-refresh is never fought over.
+  //
+  // "A fetch is already running" is a claim with an expiry date on it. These
+  // flags are cleared in a finally block, which is sound right up until the
+  // request they are waiting on never completes — and then the driver's order
+  // list stops refreshing for the rest of the session, so a newly assigned
+  // order does not appear until they tap a tab and refresh it by hand. Every
+  // request is bounded by a timeout now, which is the real fix; this is the
+  // guard for whatever else can wedge, because a poll that has given up is
+  // worse than two that overlap.
   Future<void> _poll() async {
     final token = _pollToken;
     if (token == null || token.isEmpty) return;
-    if (_isPolling || _isLoadingOrders || _isLoadingCompleted) return;
+
+    if (_isPolling || _isLoadingOrders || _isLoadingCompleted) {
+      final since = _busySince;
+      if (since == null || DateTime.now().difference(since) < _stalledAfter) {
+        return;
+      }
+      // Long past anything a live request could still be doing — take it as
+      // stalled and poll anyway rather than stay stuck behind it.
+    }
 
     _isPolling = true;
+    _markBusy();
     try {
       await refreshMyOrders(token: token, silent: true);
       // Only worth a request once the driver has actually opened the Done tab.
@@ -458,7 +613,21 @@ class DeliveryProvider extends ChangeNotifier {
       }
     } finally {
       _isPolling = false;
+      _clearBusy();
     }
+  }
+
+  // When the fetch that is currently in flight started, and how long it may
+  // run before _poll stops taking its word for it. Only ever set while one of
+  // the busy flags is up, and cleared as soon as they are all down.
+  DateTime? _busySince;
+  static const Duration _stalledAfter = Duration(seconds: 90);
+
+  void _markBusy() => _busySince ??= DateTime.now();
+
+  void _clearBusy() {
+    if (_isPolling || _isLoadingOrders || _isLoadingCompleted) return;
+    _busySince = null;
   }
 
   @override
@@ -518,13 +687,30 @@ class DeliveryProvider extends ChangeNotifier {
       pickupAddress: pickupAddress,
     );
     _currentOrder = started;
-    final index = _orders.indexWhere((o) => o.id == order.id);
-    if (index >= 0) _orders[index] = started;
+
+    // An order the driver returned earlier and is now taking back out is on
+    // the Returned tab, and starting it again is what takes it off: it is a
+    // delivery in progress from here on, and leaving it behind would show the
+    // same order sitting in two tabs at once. It also has to come off that
+    // list for refreshMyOrders to stop filtering it out of the pending one.
+    _returnedOrders.removeWhere((o) => o.id == order.id);
 
     _statusById[order.id] = DeliveryStatus.delivering;
 
+    // Held on its own so the delivery survives a refresh that does not mention
+    // it — a returned order taken back out is left out of the backend's
+    // pending list by design, and this is the only copy the app then has.
+    _activeOrders[order.id] = started;
+
+    final index = _orders.indexWhere((o) => o.id == order.id);
+    if (index >= 0) {
+      _orders[index] = started;
+    } else {
+      _orders.insert(0, started);
+    }
+
     if (order.id.isNotEmpty) {
-      BackgroundLocationService.startTracking(order.id);
+      _tracker.startTracking(order.id);
     }
 
     notifyListeners();
@@ -669,10 +855,11 @@ class DeliveryProvider extends ChangeNotifier {
   // finished state instead of falling back to "Start Delivery".
   void _finishOrder(String orderId, DeliveryStatus status) {
     _statusById[orderId] = status;
+    _activeOrders.remove(orderId);
     _pickupLocationById.remove(orderId);
     _pickupAddressById.remove(orderId);
     if (orderId.isNotEmpty) {
-      BackgroundLocationService.stopTrackingOrder(orderId);
+      _tracker.stopTrackingOrder(orderId);
     }
   }
 
@@ -682,10 +869,11 @@ class DeliveryProvider extends ChangeNotifier {
     final orderId = _currentOrder?.id;
     if (orderId != null) {
       _statusById.remove(orderId);
+      _activeOrders.remove(orderId);
       _pickupLocationById.remove(orderId);
       _pickupAddressById.remove(orderId);
       if (orderId.isNotEmpty) {
-        BackgroundLocationService.stopTrackingOrder(orderId);
+        _tracker.stopTrackingOrder(orderId);
       }
     }
     notifyListeners();
