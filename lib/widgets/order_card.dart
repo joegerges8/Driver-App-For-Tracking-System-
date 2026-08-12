@@ -1,11 +1,13 @@
+import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/route.dart';
 import 'package:delivery_boy_app/screen/order_detail_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
+import 'package:delivery_boy_app/utils/phone.dart';
 import 'package:delivery_boy_app/utils/utils.dart';
 import 'package:delivery_boy_app/widgets/custom_button.dart';
-import 'package:delivery_boy_app/widgets/dash_vertical_line.dart';
+import 'package:delivery_boy_app/widgets/order_title.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -15,9 +17,9 @@ class OrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final delivery = context.watch<DeliveryProvider>();
-    final isOngoing =
-        delivery.hasActiveDelivery && delivery.currentOrder?.id == order.id;
+    final isOngoing = delivery.isDelivering(order.id);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -36,7 +38,7 @@ class OrderCard extends StatelessWidget {
           child: Row(
             children: [
               Text(
-                isOngoing ? "Ongoing Order" : "New Order Available",
+                isOngoing ? l10n.ongoingOrder : l10n.newOrderAvailable,
                 style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
@@ -51,14 +53,6 @@ class OrderCard extends StatelessWidget {
                   color: buttonMainColor,
                 ),
               ),
-              const Spacer(),
-              if (!isOngoing)
-                GestureDetector(
-                  onTap: () {
-                    context.read<DeliveryProvider>().dismissOrder(order);
-                  },
-                  child: const Icon(Icons.close),
-                ),
             ],
           ),
         ),
@@ -87,47 +81,21 @@ class OrderCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    Text.rich(
-                      TextSpan(
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w500,
-                          fontSize: 15,
-                        ),
-                        children: [
-                          TextSpan(text: order.item),
-                          TextSpan(
-                            text: " * ${order.quantity}",
-                            style: const TextStyle(color: Colors.black38),
-                          ),
-                        ],
-                      ),
-                    ),
+                    // The order number and the store it came from. A "* 1"
+                    // used to trail the number, printed from an
+                    // OrderModel.quantity field that was hardcoded to 1 and
+                    // never reflected what was in the order; the real
+                    // per-product counts live on the order detail screen.
+                    Expanded(child: OrderTitle(order: order)),
+                    const SizedBox(width: 8),
                   ],
                 ),
               ),
               const SizedBox(height: 20),
-              // Pickup row
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Column(
-                    children: [
-                      const Icon(
-                        Icons.radio_button_checked,
-                        color: Colors.black54,
-                        size: 20,
-                      ),
-                      SizedBox(
-                        height: 35,
-                        child: DashVerticalLine(dashHeight: 6, dashGap: 5),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(width: 4),
-                  _locationInfo("Pickup - ", order.pickupAddress, "You"),
-                ],
-              ),
-              // Delivery row
+              // Delivery row.
+              // The pickup row above it is gone: it always read "Current
+              // location / You", which tells the driver nothing they do not
+              // already know, so only the destination is shown.
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -138,7 +106,11 @@ class OrderCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 5),
                   _locationInfo(
-                      "Delivery - ", order.deliveryAddress, order.customerName),
+                    l10n.deliveryLabel,
+                    order.deliveryAddress,
+                    order.customerName,
+                    order.customerPhone,
+                  ),
                 ],
               ),
               const SizedBox(height: 15),
@@ -147,8 +119,8 @@ class OrderCard extends StatelessWidget {
                 width: double.maxFinite,
                 child: CustomButton(
                   title: isOngoing
-                      ? "View ongoing order"
-                      : "View order details",
+                      ? l10n.viewOngoingOrder
+                      : l10n.viewOrderDetails,
                   onPressed: () {
                     context.read<DeliveryProvider>().setCurrentOrder(order);
                     NavigationHelper.push(context, const OrderDetailScreen());
@@ -162,7 +134,16 @@ class OrderCard extends StatelessWidget {
     );
   }
 
-  Expanded _locationInfo(String title, String address, String subtitle) {
+  Expanded _locationInfo(
+    String title,
+    String address,
+    String subtitle,
+    String phone,
+  ) {
+    // Without the +961 a store may have saved — see displayPhone. The raw
+    // number is what the detail screen dials; this is only how it reads.
+    final phoneText = displayPhone(phone);
+
     return Expanded(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -176,7 +157,9 @@ class OrderCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 15),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
                 ),
               ),
               Expanded(
@@ -186,12 +169,23 @@ class OrderCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      fontWeight: FontWeight.w500, fontSize: 15),
+                    fontWeight: FontWeight.w500,
+                    fontSize: 15,
+                  ),
                 ),
               ),
             ],
           ),
           Text(subtitle, style: const TextStyle(color: Colors.black38)),
+          if (phoneText.isNotEmpty)
+            Text(
+              phoneText,
+              style: const TextStyle(
+                color: Colors.black38,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
         ],
       ),
     );

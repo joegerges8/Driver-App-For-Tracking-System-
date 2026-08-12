@@ -25,12 +25,20 @@
         <meta-data android:name="flutterEmbedding" android:value="2" />
         <!-- for google map -->
         <meta-data android:name="com.google.android.geo.API_KEY" android:value="AIzaSyAriVJnIv8YZpcpQOIUy-4f3Tb1i0RTfAg"/>
-        <!-- flutter_background_service: keeps GPS posting alive after app is force-killed -->
+        <!-- flutter_background_service: posts GPS while the app is running.
+             stopWithTask="true" overrides the plugin's own "false" so that
+             swiping the app away from recents ends the service with it — a
+             driver who has closed the app stops being followed on the
+             dispatcher's map, which is the whole point. Location sharing is
+             deliberately no longer-lived than the app itself: it survives the
+             app being backgrounded (the driver switching to Maps to navigate
+             is still mid-delivery) and nothing beyond that. -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
             android:foregroundServiceType="location"
             android:exported="false"
-            tools:replace="android:exported" />
+            android:stopWithTask="true"
+            tools:replace="android:exported,android:stopWithTask" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

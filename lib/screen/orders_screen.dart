@@ -4,27 +4,48 @@
 // It was redesigned from a plain list to a tabbed, card-based interface with
 // the following improvements:
 //
-//  1. Tab bar       — four filter tabs: All, Pending, Active, Done.
-//  2. Earnings strip— a red banner that shows total earnings and completed
-//                     order count, calculated from the Done tab's data.
-//  3. Card layout   — each order is shown as an elevated card instead of a
+//  1. Tab bar       — three filter tabs: All, Returned, Done. A Pending tab
+//                     used to sit between All and Returned; it repeated the
+//                     All tab minus the deliveries already under way, which
+//                     the per-card status badge already tells the driver.
+//  2. Card layout   — each order is shown as an elevated card instead of a
 //                     plain ListTile, with pickup/delivery addresses and a
 //                     colour-coded status badge (orange = Pending, green = Active).
-//  4. Swipe-to-dismiss — the driver can swipe a pending order left to remove it.
-//  5. Skeleton loading — pulsing grey placeholder cards are shown while data
+//  3. Skeleton loading — pulsing grey placeholder cards are shown while data
 //                     loads, instead of a plain spinner.
-//  6. Empty states  — each tab shows a context-aware icon and message when empty.
-//  7. Done tab      — read-only green cards for completed deliveries, loaded
-//                     lazily when the driver first opens that tab.
+//  4. Empty states  — each tab shows a context-aware icon and message when empty.
+//  5. Done tab      — read-only green cards for the deliveries completed
+//                     today, loaded lazily when the driver first opens that
+//                     tab. It is the day's run, not a permanent archive: the
+//                     list starts empty each midnight, so what it holds is
+//                     always what the driver delivered today. Older
+//                     deliveries are not lost — the Shipment screen keeps the
+//                     full history, by day, week and month.
+//  6. Area filter   — chips above the tabs narrow every tab to one delivery
+//                     area (Beirut, Metn, Keserwan, ...). Replaced an earlier
+//                     per-city filter; see _AreaFilterBar for why.
+//  7. Order search  — a field above the tabs that finds one order by the
+//                     customer's phone number — typed without the +961,
+//                     whichever way the order stored it — or by its order
+//                     number, and opens the tab that order is on. See
+//                     _OrderSearchField and _jumpToMatchingTab.
 
+import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/route.dart';
 import 'package:delivery_boy_app/screen/order_detail_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
+import 'package:delivery_boy_app/utils/order_search.dart';
+import 'package:delivery_boy_app/utils/phone.dart';
+import 'package:delivery_boy_app/widgets/order_title.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
+// Label the backend uses for orders whose city string could not be matched to
+// an area. Kept in sync with UNKNOWN_AREA in the backend's areaLookup.js.
+const String _unknownArea = 'Other';
 
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
@@ -41,13 +62,19 @@ class _OrdersScreenState extends State<OrdersScreen>
   // API once per session rather than on every widget rebuild.
   String? _lastFetchToken;
 
-  // Controls the four tabs: All, Pending, Active, Done.
+  // Controls the three tabs: All, Returned, Done.
   late TabController _tabController;
+
+  // What the driver has typed into the search field, exactly as typed.
+  // Normalising happens at comparison time so the field itself never rewrites
+  // what someone is in the middle of typing.
+  final TextEditingController _searchController = TextEditingController();
+  String _searchText = '';
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
 
     // Listen for tab changes so we can lazily load completed orders only
     // when the driver actually opens the Done tab.
@@ -63,20 +90,26 @@ class _OrdersScreenState extends State<OrdersScreen>
     // Always remove listeners and dispose controllers to prevent memory leaks.
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
   // Called every time the selected tab changes.
-  // We only fetch completed orders when the Done tab (index 3) is opened,
-  // and only when the tab has finished animating (indexIsChanging == false).
-  // This is called "lazy loading" — we avoid an unnecessary API call until
-  // the data is actually needed.
+  // Opening the Returned (index 1) or Done (index 2) tab refetches that tab's
+  // list, and only once the tab has finished animating
+  // (indexIsChanging == false). Both lists come from their own endpoint, so
+  // this keeps whichever one the driver is looking at up to date.
   void _onTabChanged() {
-    if (_tabController.index == 3 && !_tabController.indexIsChanging) {
-      final token = context.read<AuthProvider>().token;
-      if (token != null && token.isNotEmpty) {
-        context.read<DeliveryProvider>().refreshCompletedOrders(token: token);
-      }
+    if (_tabController.indexIsChanging) return;
+
+    final token = context.read<AuthProvider>().token;
+    if (token == null || token.isEmpty) return;
+    final delivery = context.read<DeliveryProvider>();
+
+    if (_tabController.index == 1) {
+      delivery.refreshReturnedOrders(token: token);
+    } else if (_tabController.index == 2) {
+      delivery.refreshCompletedOrders(token: token);
     }
   }
 
@@ -88,7 +121,22 @@ class _OrdersScreenState extends State<OrdersScreen>
     if (token == null || token.isEmpty) return;
     if (_lastFetchToken == token) return;
     _lastFetchToken = token;
-    context.read<DeliveryProvider>().refreshMyOrders(token: token);
+    final delivery = context.read<DeliveryProvider>();
+    delivery.refreshMyOrders(token: token);
+
+    // The Completed tab's label carries a count out of the completed list,
+    // which otherwise only loads when that tab is opened — so a driver who
+    // never opened it read (0) for work they had done. Silent, so the Done tab
+    // keeps ownership of its own skeleton and error states and this fetch
+    // cannot flash either of them on arrival.
+    delivery.refreshCompletedOrders(token: token, silent: true);
+
+    // The Returned tab is fetched on startup for the same reason, and for one
+    // more: it is the only thing that puts a returned order back on screen
+    // after the app has been closed. Waiting for the driver to open the tab
+    // would show them an empty Returned list — which is exactly what the tab
+    // looked like before it had an endpoint to read from at all.
+    delivery.refreshReturnedOrders(token: token, silent: true);
   }
 
   @override
@@ -99,30 +147,144 @@ class _OrdersScreenState extends State<OrdersScreen>
     Future.microtask(_maybeFetch);
   }
 
+  // Currently selected delivery area, or null for "All". Lives on the screen
+  // rather than inside one tab so the same filter applies everywhere — picking
+  // Keserwan narrows All, Returned and Completed at once.
+  String? _selectedArea;
+
+  // The areas actually present in the driver's orders, sorted, with the
+  // catch-all bucket pushed to the end so it never crowds out real areas.
+  List<String> _areasIn(List<List<OrderModel>> orderLists) {
+    final areas = <String>{};
+    var hasUnfiled = false;
+
+    for (final list in orderLists) {
+      for (final order in list) {
+        // An empty area means the row predates the backend's area column, which
+        // is the same situation for a driver as one the lookup could not place.
+        if (order.area.isEmpty || order.area == _unknownArea) {
+          hasUnfiled = true;
+        } else {
+          areas.add(order.area);
+        }
+      }
+    }
+
+    final sorted = areas.toList()..sort();
+
+    // Only offer the catch-all chip alongside real areas. If nothing is
+    // classified yet — an app pointed at a backend that hasn't been backfilled —
+    // a lone "Other" chip filters nothing, so the bar stays hidden instead.
+    if (hasUnfiled && sorted.isNotEmpty) sorted.add(_unknownArea);
+    return sorted;
+  }
+
+  // Applies the selected area to a list. Orders with no area at all (written
+  // before the backend started classifying) count as unfiled, so they show up
+  // under the same chip as the ones the lookup could not place.
+  List<OrderModel> _filterByArea(List<OrderModel> orders) {
+    final selected = _selectedArea;
+    if (selected == null) return orders;
+
+    if (selected == _unknownArea) {
+      return orders
+          .where((o) => o.area.isEmpty || o.area == _unknownArea)
+          .toList();
+    }
+
+    return orders.where((o) => o.area == selected).toList();
+  }
+
+  // The search as it is shown back to the driver — what they typed, trimmed.
+  // Comparison uses the raw text; the matchers normalise both sides themselves.
+  String get _query => _searchText.trim();
+
+  // A field holding only '#', spaces or the first half of a country code is
+  // not a search yet — see isSearchActive — and the list stays whole.
+  bool get _isSearching => isSearchActive(_searchText);
+
+  // What a tab shows: the searched order, or the area-filtered list.
+  //
+  // A search deliberately ignores the area chips. Looking up a number is not
+  // browsing — the driver has one specific order in mind, usually because a
+  // customer is on the phone about it — and silently hiding it because a chip
+  // from ten minutes ago points at another area would look exactly like the
+  // order not existing. The chip bar hides itself while a search is running so
+  // the two filters are never shown as if they were both in force.
+  List<OrderModel> _visible(List<OrderModel> orders) {
+    if (_isSearching) {
+      return orders
+          .where(
+            (o) => orderMatchesSearch(
+              phone: o.customerPhone,
+              orderNumber: o.orderNumber,
+              query: _searchText,
+            ),
+          )
+          .toList();
+    }
+
+    return _filterByArea(orders);
+  }
+
+  // The three lists in tab order, so the search can reason about the tab bar
+  // without repeating which tab shows what.
+  List<List<OrderModel>> _tabLists(DeliveryProvider delivery) => [
+    delivery.orders,
+    delivery.returnedOrders,
+    delivery.todaysCompletedOrders,
+  ];
+
+  // Opens the tab the searched order is actually sitting on.
+  //
+  // An order the driver returned or delivered is not on the All tab, so
+  // searching its number from there used to land on an empty list and read as
+  // though the order did not exist. The count in each tab label said otherwise,
+  // but only to a driver who thought to look up at it.
+  //
+  // Called as the driver types, so the tab follows the number narrowing down:
+  // '2' still matches half the All tab and stays put, while the full 2693 that
+  // only matches a delivered order opens Completed.
+  void _jumpToMatchingTab(String text) {
+    if (!isSearchActive(text)) return;
+
+    final lists = _tabLists(context.read<DeliveryProvider>());
+    bool holdsMatch(List<OrderModel> orders) => orders.any(
+          (o) => orderMatchesSearch(
+            phone: o.customerPhone,
+            orderNumber: o.orderNumber,
+            query: text,
+          ),
+        );
+
+    // Never move a driver off a tab that already answers their search: having
+    // opened Completed to look through delivered orders is a choice, and the
+    // All tab holding the same order is no reason to overrule it.
+    if (holdsMatch(lists[_tabController.index])) return;
+
+    final target = lists.indexWhere(holdsMatch);
+
+    // Nothing anywhere — a number typed halfway, or an order that is not the
+    // driver's. Leave them where they are rather than shuffling the tabs
+    // under a search that has not found anything yet.
+    if (target == -1) return;
+
+    _tabController.animateTo(target);
+  }
+
   @override
   Widget build(BuildContext context) {
     // context.watch rebuilds this widget automatically whenever DeliveryProvider
     // calls notifyListeners() (e.g. after a fetch completes).
+    final l10n = context.l10n;
     final delivery = context.watch<DeliveryProvider>();
-
-    // Determine whether there is currently an order being actively delivered.
-    // Used only for the earnings strip "In Progress" pill.
-    final isActive = delivery.currentOrder != null &&
-        delivery.status != DeliveryStatus.waitingForAcceptance &&
-        delivery.status != DeliveryStatus.delivered &&
-        delivery.status != DeliveryStatus.rejected;
-
-    // Pending tab: all orders except the one currently being delivered.
-    final pendingOrders = delivery.orders
-        .where((o) => !(isActive && o.id == delivery.currentOrder!.id))
-        .toList();
 
     return Scaffold(
       backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: const Text(
-          'My Orders',
-          style: TextStyle(fontWeight: FontWeight.bold),
+        title: Text(
+          l10n.myOrders,
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
@@ -135,34 +297,64 @@ class _OrdersScreenState extends State<OrdersScreen>
           indicatorWeight: 3,
           isScrollable: true,
           tabAlignment: TabAlignment.start,
+          // The counts follow the search as well as the area filter, so a
+          // driver searching 2693 reads which tab the order is sitting in
+          // instead of having to open all three looking for it.
           tabs: [
-            Tab(text: 'All (${delivery.orders.length})'),
-            Tab(text: 'Pending (${pendingOrders.length})'),
-            Tab(text: 'Returned (${delivery.returnedOrders.length})'),
-            Tab(text: 'Completed (${delivery.completedOrders.length})'),
+            Tab(text: l10n.tabAll(_visible(delivery.orders).length)),
+            Tab(
+              text: l10n.tabReturned(
+                _visible(delivery.returnedOrders).length,
+              ),
+            ),
+            Tab(
+              text: l10n.tabCompleted(
+                _visible(delivery.todaysCompletedOrders).length,
+              ),
+            ),
           ],
         ),
       ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          final token = context.read<AuthProvider>().token;
-          if (token != null && token.isNotEmpty) {
-            await context
-                .read<DeliveryProvider>()
-                .refreshMyOrders(token: token);
-          }
-        },
-        child: _buildBody(delivery, pendingOrders, isActive),
+      // The search field sits outside the RefreshIndicator so it stays put
+      // while the list below it is loading, erroring or being pulled down.
+      body: Column(
+        children: [
+          _OrderSearchField(
+            controller: _searchController,
+            onChanged: (text) {
+              setState(() => _searchText = text);
+              // After the lists have been narrowed, so the tab this picks is
+              // the one the driver is about to be shown.
+              _jumpToMatchingTab(text);
+            },
+          ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: () async {
+                final token = context.read<AuthProvider>().token;
+                if (token == null || token.isEmpty) return;
+                final delivery = context.read<DeliveryProvider>();
+                await delivery.refreshMyOrders(token: token);
+                // Pulling down on the Returned or Done tab has to refresh the
+                // list being pulled, not just the assigned one behind it.
+                if (_tabController.index == 1) {
+                  await delivery.refreshReturnedOrders(token: token);
+                } else if (_tabController.index == 2) {
+                  await delivery.refreshCompletedOrders(token: token);
+                }
+              },
+              child: _buildBody(context, delivery),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   // Decides what to show in the body based on the current loading/error state.
-  Widget _buildBody(
-    DeliveryProvider delivery,
-    List<OrderModel> pendingOrders,
-    bool isActive,
-  ) {
+  Widget _buildBody(BuildContext context, DeliveryProvider delivery) {
+    final l10n = context.l10n;
+
     // Show skeleton cards while the initial fetch is in progress.
     if (delivery.isLoadingOrders) {
       return const _SkeletonList();
@@ -186,31 +378,76 @@ class _OrdersScreenState extends State<OrdersScreen>
       );
     }
 
-    // Main layout: earnings strip on top, then the four tab views below.
+    // Every area present across all three lists, so switching tabs never makes
+    // the chip you selected disappear from the bar.
+    final areas = _areasIn([
+      delivery.orders,
+      delivery.returnedOrders,
+      delivery.todaysCompletedOrders,
+    ]);
+
+    // What each tab shows, narrowed by the search or the area chips. The Done
+    // tab is scoped to today's deliveries — see todaysCompletedOrders.
+    final allTab = _visible(delivery.orders);
+    final returnedTab = _visible(delivery.returnedOrders);
+    final completedTab = _visible(delivery.todaysCompletedOrders);
+
+    // While a search is running the tabs show whatever matched what was typed,
+    // so the empty state says so rather than claiming the driver has no orders.
+    String emptyMessage(String whenBrowsing) =>
+        _isSearching ? l10n.noOrderMatching(_query) : whenBrowsing;
+
+    // Typing a number opens the tab holding it, so an empty tab during a search
+    // usually means the number is on no tab at all — and telling that driver to
+    // keep looking would send them through three empty tabs. Only when the
+    // order is genuinely elsewhere, which is a driver who moved tabs by hand
+    // after the search landed, is that the advice worth giving.
+    final bool foundSomewhere = allTab.isNotEmpty ||
+        returnedTab.isNotEmpty ||
+        completedTab.isNotEmpty;
+    final String? emptyHint = !_isSearching
+        ? null
+        : (foundSomewhere ? l10n.tryOtherTabs : l10n.orderNotInYourList);
+
+    // Main layout: area filter, then the three tab views.
     return Column(
       children: [
-        _EarningsSummaryStrip(
-          completedOrders: delivery.completedOrders,
-          isActive: isActive,
-        ),
+        // Hidden during a search, which ignores the area filter — see _visible.
+        if (areas.isNotEmpty && !_isSearching)
+          _AreaFilterBar(
+            areas: areas,
+            selectedArea: _selectedArea,
+            onSelected: (area) => setState(() {
+              // Tapping the active chip clears the filter, so "All" is always
+              // one tap away without hunting for it.
+              _selectedArea = (area.isEmpty || _selectedArea == area)
+                  ? null
+                  : area;
+            }),
+          ),
         Expanded(
           child: TabBarView(
             controller: _tabController,
             children: [
               // All tab — every assigned order.
               _OrderList(
-                orders: delivery.orders,
-                emptyMessage: 'No orders assigned yet',
+                orders: allTab,
+                emptyMessage: emptyMessage(l10n.noOrdersAssigned),
+                emptyHint: emptyHint,
               ),
-              // Pending tab — orders not yet accepted, with city filter.
-              _PendingTabContent(orders: pendingOrders),
-              // Returned tab — orders the driver dismissed.
+              // Returned tab — orders the driver marked as returned.
               _OrderList(
-                orders: delivery.returnedOrders,
-                emptyMessage: 'No returned orders',
+                orders: returnedTab,
+                emptyMessage: emptyMessage(l10n.noReturnedOrders),
+                emptyHint: emptyHint,
               ),
               // Done tab — read-only cards for completed deliveries.
-              _CompletedOrderList(delivery: delivery),
+              _CompletedOrderList(
+                orders: completedTab,
+                delivery: delivery,
+                emptyMessage: emptyMessage(l10n.noDeliveriesToday),
+                emptyHint: emptyHint,
+              ),
             ],
           ),
         ),
@@ -219,171 +456,123 @@ class _OrdersScreenState extends State<OrdersScreen>
   }
 }
 
-// ──────────────────────── Earnings Summary Strip ───────────────────────────
+// ──────────────────────── Order Search Field ──────────────────────────────
 //
-// A red banner pinned above the tab views that shows:
-//   - Total Earned: the sum of all completed orders' prices.
-//   - Completed:    how many orders have been marked as delivered.
-//   - "In Progress" pill: shown only when a delivery is currently active.
+// Finds one order by the customer's phone number, or by its order number if
+// that is what the driver has. A driver calling a customer back types the
+// number as they know it — no '+961' whether or not the order was saved with
+// one, no '#', no case to get right — and the matchers strip all of it before
+// comparing. See normalizePhone for why the country code cannot be required.
 //
-// The values are derived from completedOrders (fetched from the Done tab
-// endpoint), so the strip accurately reflects real delivered orders rather
-// than just assigned ones.
+// The keyboard is the phone one because both kinds of number are digits, and a
+// driver holding a phone in one hand at a gate should not have to hunt for
+// them on a letter keyboard. Nothing is lost for a store whose order numbers
+// carry a prefix ('EN2693'): matching is on any part of the number, so the
+// digits alone still find it.
 
-class _EarningsSummaryStrip extends StatelessWidget {
-  final List<OrderModel> completedOrders;
-  final bool isActive;
+class _OrderSearchField extends StatelessWidget {
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
 
-  const _EarningsSummaryStrip({required this.completedOrders, required this.isActive});
+  const _OrderSearchField({required this.controller, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
-    // Sum the price field across all completed orders.
-    final total = completedOrders.fold<int>(0, (sum, o) => sum + o.price);
+    final hasText = controller.text.isNotEmpty;
+    final isRtl = Directionality.of(context) == TextDirection.rtl;
 
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      decoration: BoxDecoration(
-        color: buttonMainColor,
-        boxShadow: [
-          BoxShadow(
-            color: buttonMainColor.withValues(alpha: 0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        // Phone rather than number: the driver may still type a leading '+',
+        // and the phone keypad is the one they are used to for a number like
+        // this. Neither the '+' nor the country code is required — see
+        // normalizePhone — but typing it must not be made impossible.
+        keyboardType: TextInputType.phone,
+        textInputAction: TextInputAction.search,
+        style: const TextStyle(fontSize: 14),
+        // An order number reads left to right in every language — 2693 is 2693
+        // in Arabic too. Without this the field inherited the Arabic build's
+        // right-to-left direction and laid the digits out as a left-to-right
+        // island inside a right-to-left line, and the backspace key stopped
+        // deleting: the keyboard deletes the character before the cursor, and
+        // in that mixed-direction line the cursor sat at the start of the
+        // number rather than after the last digit, so there was nothing before
+        // it to delete. The driver was left clearing the whole number with the
+        // X to correct one digit. Pinning the direction makes the field behave
+        // exactly as it already does in English.
+        textDirection: TextDirection.ltr,
+        // Alignment is separate from direction: this keeps the number against
+        // the search icon, which sits on the right in Arabic, without putting
+        // the mixed-direction line — and the bug — back.
+        textAlign: isRtl ? TextAlign.right : TextAlign.left,
+        decoration: InputDecoration(
+          hintText: context.l10n.searchPhoneNumber,
+          hintStyle: const TextStyle(color: Colors.black38, fontSize: 14),
+          // The hint is a sentence in the app's own language, so it follows the
+          // app's direction rather than the number's — otherwise the Arabic
+          // hint renders with its comma and example number in the wrong places.
+          hintTextDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+          prefixIcon: const Icon(Icons.search, size: 20, color: Colors.black45),
+          // Clearing is one tap, so a driver who searched an order and now
+          // wants their list back is never left deleting digits.
+          suffixIcon: hasText
+              ? IconButton(
+                  icon: const Icon(Icons.close, size: 18),
+                  color: Colors.black45,
+                  onPressed: () {
+                    controller.clear();
+                    onChanged('');
+                    // Put the keyboard away with the search: the driver is
+                    // going back to reading the list, not typing again.
+                    FocusScope.of(context).unfocus();
+                  },
+                )
+              : null,
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          filled: true,
+          fillColor: Colors.grey.shade100,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.grey.shade300),
           ),
-        ],
-      ),
-      child: Row(
-        children: [
-          _StatColumn(label: 'Total Earned', value: '\$$total'),
-          const Spacer(),
-          _StatColumn(label: 'Completed', value: '${completedOrders.length}'),
-          // The "In Progress" pill is conditionally shown only when the driver
-          // has accepted an order and is currently on the way.
-          if (isActive) ...[
-            const SizedBox(width: 16),
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: Colors.white24,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.local_shipping, color: Colors.white, size: 13),
-                  SizedBox(width: 4),
-                  Text(
-                    'In Progress',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-// A small column showing a label above a large value, used inside the
-// earnings strip for "Total Earned" and "Completed".
-class _StatColumn extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _StatColumn({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 11)),
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.grey.shade300),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: buttonMainColor),
           ),
         ),
-      ],
+      ),
     );
   }
 }
 
-// ──────────────────────── Pending Tab (with city filter) ──────────────────
+// ──────────────────────── Area Filter Bar ─────────────────────────────────
 //
-// Wraps _OrderList with a horizontal row of city filter chips at the top.
-// Manages its own _selectedCity state so the filter is isolated from the
-// parent screen.
-
-class _PendingTabContent extends StatefulWidget {
-  final List<OrderModel> orders;
-
-  const _PendingTabContent({required this.orders});
-
-  @override
-  State<_PendingTabContent> createState() => _PendingTabContentState();
-}
-
-class _PendingTabContentState extends State<_PendingTabContent> {
-  String? _selectedCity; // null = "All"
-
-  @override
-  Widget build(BuildContext context) {
-    final cities = widget.orders
-        .map((o) => o.city)
-        .where((c) => c.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
-
-    final filtered = _selectedCity == null
-        ? widget.orders
-        : widget.orders.where((o) => o.city == _selectedCity).toList();
-
-    return Column(
-      children: [
-        if (cities.isNotEmpty)
-          _CityFilterBar(
-            cities: cities,
-            selectedCity: _selectedCity,
-            onSelected: (city) => setState(() {
-              _selectedCity = _selectedCity == city ? null : city;
-            }),
-          ),
-        Expanded(
-          child: _OrderList(
-            orders: filtered,
-            emptyMessage: 'No pending orders',
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ──────────────────────── City Filter Bar ─────────────────────────────────
+// A horizontally scrollable row of filter chips — one per delivery area the
+// driver currently has orders in, plus an "All" chip that clears the filter.
 //
-// A horizontally scrollable row of filter chips — one per unique city in the
-// pending orders list, plus an "All" chip that clears the filter.
+// This replaced a per-city filter. Cities come from the Shopify checkout as
+// free text, so a single town produced several chips ("Zahle", "zahle",
+// "Zahle Madine") and a busy driver could face dozens of them. The backend now
+// maps each city onto a delivery area, which is both stable and the unit a
+// dispatcher actually thinks in.
 
-class _CityFilterBar extends StatelessWidget {
-  final List<String> cities;
-  final String? selectedCity;
+class _AreaFilterBar extends StatelessWidget {
+  final List<String> areas;
+  final String? selectedArea;
   final ValueChanged<String> onSelected;
 
-  const _CityFilterBar({
-    required this.cities,
-    required this.selectedCity,
+  const _AreaFilterBar({
+    required this.areas,
+    required this.selectedArea,
     required this.onSelected,
   });
 
@@ -396,24 +585,34 @@ class _CityFilterBar extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            _chip(context, label: 'All', selected: selectedCity == null,
-                onTap: () => onSelected('')),
-            ...cities.map((city) => _chip(
-                  context,
-                  label: city,
-                  selected: selectedCity == city,
-                  onTap: () => onSelected(city),
-                )),
+            _chip(
+              context,
+              label: context.l10n.filterAll,
+              selected: selectedArea == null,
+              onTap: () => onSelected(''),
+            ),
+            ...areas.map(
+              (area) => _chip(
+                context,
+                // Area names come from the backend in English; only the
+                // catch-all bucket has a translation to show.
+                label: area == _unknownArea ? context.l10n.areaOther : area,
+                selected: selectedArea == area,
+                onTap: () => onSelected(area),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _chip(BuildContext context,
-      {required String label,
-      required bool selected,
-      required VoidCallback onTap}) {
+  Widget _chip(
+    BuildContext context, {
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: GestureDetector(
@@ -444,23 +643,26 @@ class _CityFilterBar extends StatelessWidget {
 
 // ──────────────────────── Order List (All / Returned tabs) ────────────────
 //
-// A scrollable list of orders. Each item is wrapped in a Dismissible widget
-// so the driver can swipe left to remove an order.
-// Tapping an order opens the OrderDetailScreen where it can be accepted.
+// A scrollable list of orders.
+// Tapping an order opens the OrderDetailScreen where the delivery is started.
 
 class _OrderList extends StatelessWidget {
   final List<OrderModel> orders;
   final String emptyMessage;
 
+  // Second line of the empty state. Null keeps the tab's usual one.
+  final String? emptyHint;
+
   const _OrderList({
     required this.orders,
     required this.emptyMessage,
+    this.emptyHint,
   });
 
   @override
   Widget build(BuildContext context) {
     if (orders.isEmpty) {
-      return _EmptyState(message: emptyMessage);
+      return _EmptyState(message: emptyMessage, hint: emptyHint);
     }
 
     return ListView.builder(
@@ -476,70 +678,20 @@ class _OrderList extends StatelessWidget {
         // callback/builder, not the main build method — no rebuild needed.
         final delivery = context.read<DeliveryProvider>();
 
-        // Determine if this order is the one currently being actively delivered.
-        final isCurrentActive = delivery.currentOrder?.id == order.id &&
-            delivery.status != DeliveryStatus.waitingForAcceptance;
+        // Determine if this order is one of the ones being actively delivered.
+        final isCurrentActive = delivery.isDelivering(order.id);
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          // Dismissible allows the driver to swipe the card left to dismiss it.
-          // A confirmation dialog is shown before the order is actually removed.
-          child: Dismissible(
-            key: Key(order.id), // Unique key required by Dismissible.
-            direction: DismissDirection.endToStart, // Swipe left only.
-            // Red background with a bin icon revealed during the swipe.
-            background: Container(
-              alignment: Alignment.centerRight,
-              padding: const EdgeInsets.only(right: 20),
-              decoration: BoxDecoration(
-                color: Colors.red.shade400,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Icon(
-                Icons.delete_outline,
-                color: Colors.white,
-                size: 28,
-              ),
-            ),
-            // Ask the driver to confirm before removing the order.
-            confirmDismiss: (_) async {
-              return await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Dismiss Order'),
-                      content:
-                          const Text('Remove this order from your list?'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('Cancel'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, true),
-                          child: const Text(
-                            'Dismiss',
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ) ??
-                  false;
+          child: _OrderListCard(
+            order: order,
+            isCurrentActive: isCurrentActive,
+            onTap: () {
+              // Set this order as the current one in the provider, then
+              // navigate to the detail screen where the delivery is started.
+              context.read<DeliveryProvider>().setCurrentOrder(order);
+              NavigationHelper.push(context, const OrderDetailScreen());
             },
-            // Calls dismissOrder on the provider, which removes the order from
-            // the in-memory list and triggers a UI rebuild via notifyListeners().
-            onDismissed: (_) =>
-                context.read<DeliveryProvider>().dismissOrder(order),
-            child: _OrderListCard(
-              order: order,
-              isCurrentActive: isCurrentActive,
-              onTap: () {
-                // Set this order as the current one in the provider, then
-                // navigate to the detail screen where it can be accepted.
-                context.read<DeliveryProvider>().setCurrentOrder(order);
-                NavigationHelper.push(context, const OrderDetailScreen());
-              },
-            ),
           ),
         );
       },
@@ -551,7 +703,7 @@ class _OrderList extends StatelessWidget {
 //
 // Visual card for a single pending or active order. Consists of:
 //   - Header: order number + colour-coded status badge.
-//   - Body:   pickup address → delivery address with a connecting line.
+//   - Body:   delivery address.
 //   - Footer: customer name on the left, price + chevron on the right.
 
 class _OrderListCard extends StatelessWidget {
@@ -586,12 +738,12 @@ class _OrderListCard extends StatelessWidget {
           children: [
             // ── Card Header ──────────────────────────────────────────────
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: Colors.grey.shade50,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(16)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(16),
+                ),
               ),
               child: Row(
                 children: [
@@ -601,17 +753,7 @@ class _OrderListCard extends StatelessWidget {
                     color: Colors.black54,
                   ),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      order.item, // e.g. "Order #1664"
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 15,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
+                  Expanded(child: OrderTitle(order: order)),
                   const SizedBox(width: 8),
                   // Status badge: orange "Pending" or green "Active".
                   _StatusBadge(isActive: isCurrentActive),
@@ -623,66 +765,26 @@ class _OrderListCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
               child: Column(
                 children: [
-                  // Pickup row — circle icon + vertical line connecting to
-                  // the delivery row below, visually representing a route.
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Column(
-                        children: [
-                          const Icon(
-                            Icons.radio_button_checked,
-                            color: Colors.black38,
-                            size: 18,
-                          ),
-                          // The thin vertical line between the two location icons.
-                          Container(
-                              width: 1, height: 18, color: Colors.black12),
-                        ],
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Pickup',
-                              style: TextStyle(
-                                  color: Colors.black38, fontSize: 11),
-                            ),
-                            Text(
-                              order.pickupAddress,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
                   // Delivery row — red pin icon marking the destination.
+                  // A pickup row used to sit above it, joined by a short
+                  // vertical line to read as a route. It only ever said
+                  // "Current location", which is where the driver already is,
+                  // so the destination is the whole of the route worth showing.
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.location_on,
-                        color: buttonMainColor,
-                        size: 18,
-                      ),
+                      Icon(Icons.location_on, color: buttonMainColor, size: 18),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Delivery',
-                              style: TextStyle(
-                                  color: Colors.black38, fontSize: 11),
+                            Text(
+                              context.l10n.delivery,
+                              style: const TextStyle(
+                                color: Colors.black38,
+                                fontSize: 11,
+                              ),
                             ),
                             Text(
                               order.deliveryAddress,
@@ -699,30 +801,79 @@ class _OrderListCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  // ── Footer: customer name + price + arrow ────────────
+                  // ── Footer: customer name/phone + price + arrow ───────
                   Row(
                     children: [
-                      const Icon(Icons.person_outline,
-                          size: 15, color: Colors.black45),
-                      const SizedBox(width: 4),
-                      Text(
-                        order.customerName,
-                        style: const TextStyle(
-                            color: Colors.black54, fontSize: 13),
+                      const Icon(
+                        Icons.person_outline,
+                        size: 15,
+                        color: Colors.black45,
                       ),
-                      const Spacer(),
-                      Text(
-                        '\$${order.price}',
-                        style: TextStyle(
-                          color: buttonMainColor,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              order.customerName,
+                              style: const TextStyle(
+                                color: Colors.black54,
+                                fontSize: 13,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            // Without the +961 a store may have saved: the
+                            // driver is in Lebanon and knows it — see
+                            // displayPhone. Calling still uses the raw number.
+                            if (displayPhone(order.customerPhone).isNotEmpty)
+                              Text(
+                                displayPhone(order.customerPhone),
+                                style: const TextStyle(
+                                  color: Colors.black38,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                          ],
                         ),
+                      ),
+                      const SizedBox(width: 12),
+                      // The order's own value, not an earning — the delivery
+                      // hasn't happened yet. Prepaid orders are flagged so the
+                      // driver knows there is no cash to collect on arrival.
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            '\$${order.price}',
+                            style: TextStyle(
+                              color: order.isPrepaid
+                                  ? Colors.black38
+                                  : buttonMainColor,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          if (order.isPrepaid)
+                            Text(
+                              context.l10n.prepaid,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.black38,
+                              ),
+                            ),
+                        ],
                       ),
                       const SizedBox(width: 8),
                       // Chevron hints that the card is tappable.
-                      const Icon(Icons.chevron_right,
-                          color: Colors.black26, size: 20),
+                      const Icon(
+                        Icons.chevron_right,
+                        color: Colors.black26,
+                        size: 20,
+                      ),
                     ],
                   ),
                 ],
@@ -754,7 +905,7 @@ class _StatusBadge extends StatelessWidget {
         ),
       ),
       child: Text(
-        isActive ? 'Active' : 'Pending',
+        isActive ? context.l10n.statusActive : context.l10n.statusPending,
         style: TextStyle(
           color: isActive ? Colors.green.shade700 : Colors.orange.shade700,
           fontSize: 11,
@@ -767,15 +918,27 @@ class _StatusBadge extends StatelessWidget {
 
 // ──────────────────────── Completed Order List (Done tab) ─────────────────
 //
-// Shows orders whose status is "DELIVERED" in the database. These are fetched
-// from a separate backend endpoint (GET /api/drivers/me/orders/completed) and
-// loaded lazily — only when the driver first opens the Done tab.
-// Completed orders are read-only (no swipe-to-dismiss).
+// Shows the orders this driver delivered today. These are fetched from a
+// separate backend endpoint (GET /api/drivers/me/orders/completed), which
+// answers with the driver's recent deliveries, and narrowed to today's by
+// DeliveryProvider.todaysCompletedOrders — that is what empties this tab at
+// midnight. Loaded lazily, only when the driver first opens the tab.
+// Completed orders are read-only.
 
 class _CompletedOrderList extends StatelessWidget {
+  // Already narrowed by the area filter or the search; `delivery` is still
+  // needed for the loading and error states, which are neither.
+  final List<OrderModel> orders;
   final DeliveryProvider delivery;
+  final String emptyMessage;
+  final String? emptyHint;
 
-  const _CompletedOrderList({required this.delivery});
+  const _CompletedOrderList({
+    required this.orders,
+    required this.delivery,
+    required this.emptyMessage,
+    this.emptyHint,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -803,9 +966,10 @@ class _CompletedOrderList extends StatelessWidget {
     }
 
     // Show the empty state if there are no completed orders yet.
-    if (delivery.completedOrders.isEmpty) {
-      return const _EmptyState(
-        message: 'No deliveries completed today',
+    if (orders.isEmpty) {
+      return _EmptyState(
+        message: emptyMessage,
+        hint: emptyHint,
         isCompletedTab: true,
       );
     }
@@ -814,9 +978,9 @@ class _CompletedOrderList extends StatelessWidget {
     return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-      itemCount: delivery.completedOrders.length,
+      itemCount: orders.length,
       itemBuilder: (context, index) {
-        final order = delivery.completedOrders[index];
+        final order = orders[index];
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: _CompletedOrderCard(order: order),
@@ -854,35 +1018,33 @@ class _CompletedOrderCard extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: Colors.green.shade50,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(16)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(16),
+              ),
             ),
             child: Row(
               children: [
-                Icon(Icons.check_circle_outline,
-                    size: 18, color: Colors.green.shade600),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    order.item,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 15),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                Icon(
+                  Icons.check_circle_outline,
+                  size: 18,
+                  color: Colors.green.shade600,
                 ),
+                const SizedBox(width: 8),
+                Expanded(child: OrderTitle(order: order)),
                 const SizedBox(width: 8),
                 // "Delivered" badge in green.
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.green.shade100,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: Colors.green.shade300),
                   ),
                   child: Text(
-                    'Delivered',
+                    context.l10n.statusDelivered,
                     style: TextStyle(
                       color: Colors.green.shade700,
                       fontSize: 11,
@@ -893,40 +1055,83 @@ class _CompletedOrderCard extends StatelessWidget {
               ],
             ),
           ),
-          // Compact body row: delivery address, customer name, price.
+          // Compact body row: delivery address, customer name/phone, price.
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
             child: Row(
               children: [
-                const Icon(Icons.location_on_outlined,
-                    size: 15, color: Colors.black45),
+                const Icon(
+                  Icons.location_on_outlined,
+                  size: 15,
+                  color: Colors.black45,
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     order.deliveryAddress,
-                    style: const TextStyle(
-                        fontSize: 13, color: Colors.black54),
+                    style: const TextStyle(fontSize: 13, color: Colors.black54),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Icon(Icons.person_outline,
-                    size: 15, color: Colors.black45),
+                const Icon(
+                  Icons.person_outline,
+                  size: 15,
+                  color: Colors.black45,
+                ),
                 const SizedBox(width: 4),
-                Text(
-                  order.customerName,
-                  style: const TextStyle(
-                      fontSize: 13, color: Colors.black54),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        order.customerName,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Colors.black54,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      // Shown without its country code, as on the card above.
+                      if (displayPhone(order.customerPhone).isNotEmpty)
+                        Text(
+                          displayPhone(order.customerPhone),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.black38,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  '\$${order.price}',
-                  style: TextStyle(
-                    color: buttonMainColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
+                // Mirrors the earnings strip: a prepaid order earned nothing,
+                // so it shows $0 with its own price kept as a caption.
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '\$${order.earnedPrice}',
+                      style: TextStyle(
+                        color: order.isPrepaid ? Colors.black38 : buttonMainColor,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if (order.isPrepaid)
+                      Text(
+                        '\$${order.price} ${context.l10n.prepaid.toLowerCase()}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.black38,
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),
@@ -948,16 +1153,25 @@ class _EmptyState extends StatelessWidget {
   final String message;
   final bool isCompletedTab;
 
+  // Overrides the second line. Used by the search, where "pull down to refresh"
+  // would be advice that cannot help — the order is simply on another tab.
+  final String? hint;
+
   const _EmptyState({
     required this.message,
+    this.hint,
     this.isCompletedTab = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final icon = isCompletedTab
-        ? Icons.check_circle_outline
-        : Icons.inbox_outlined;
+    // A search that found nothing here is not the same emptiness as a tab with
+    // no orders in it, and the magnifying glass says which one this is.
+    final icon = hint != null
+        ? Icons.search_off
+        : isCompletedTab
+            ? Icons.check_circle_outline
+            : Icons.inbox_outlined;
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -976,9 +1190,10 @@ class _EmptyState extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          isCompletedTab
-              ? 'Completed deliveries will appear here'
-              : 'Pull down to refresh',
+          hint ??
+              (isCompletedTab
+                  ? context.l10n.completedWillAppearHere
+                  : context.l10n.pullDownToRefresh),
           textAlign: TextAlign.center,
           style: const TextStyle(color: Colors.black26, fontSize: 13),
         ),
@@ -1034,14 +1249,16 @@ class _SkeletonCardState extends State<_SkeletonCard>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true); // Animate forward then backward, looping forever.
-    _opacity = Tween<double>(begin: 0.4, end: 0.85).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
+    _opacity = Tween<double>(
+      begin: 0.4,
+      end: 0.85,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
   }
 
   @override
   void dispose() {
-    _controller.dispose(); // Must dispose to stop the animation and free memory.
+    _controller
+        .dispose(); // Must dispose to stop the animation and free memory.
     super.dispose();
   }
 
@@ -1068,11 +1285,12 @@ class _SkeletonCardState extends State<_SkeletonCard>
               // Placeholder header area.
               Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 14),
+                  horizontal: 16,
+                  vertical: 14,
+                ),
                 decoration: const BoxDecoration(
                   color: Color(0xFFF5F5F5),
-                  borderRadius:
-                      BorderRadius.vertical(top: Radius.circular(16)),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
                 ),
                 child: Row(
                   children: [
@@ -1089,23 +1307,25 @@ class _SkeletonCardState extends State<_SkeletonCard>
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
                 child: Column(
                   children: [
-                    Row(children: [
-                      _box(18, 18, radius: 9),
-                      const SizedBox(width: 10),
-                      Expanded(child: _box(double.infinity, 14)),
-                    ]),
+                    Row(
+                      children: [
+                        _box(18, 18, radius: 9),
+                        const SizedBox(width: 10),
+                        Expanded(child: _box(double.infinity, 14)),
+                      ],
+                    ),
                     const SizedBox(height: 10),
-                    Row(children: [
-                      _box(18, 18, radius: 9),
-                      const SizedBox(width: 10),
-                      Expanded(child: _box(double.infinity, 14)),
-                    ]),
+                    Row(
+                      children: [
+                        _box(18, 18, radius: 9),
+                        const SizedBox(width: 10),
+                        Expanded(child: _box(double.infinity, 14)),
+                      ],
+                    ),
                     const SizedBox(height: 16),
-                    Row(children: [
-                      _box(100, 13),
-                      const Spacer(),
-                      _box(55, 16),
-                    ]),
+                    Row(
+                      children: [_box(100, 13), const Spacer(), _box(55, 16)],
+                    ),
                   ],
                 ),
               ),
@@ -1118,11 +1338,11 @@ class _SkeletonCardState extends State<_SkeletonCard>
 
   // Helper that builds a grey rounded rectangle used as a content placeholder.
   Widget _box(double width, double height, {double radius = 6}) => Container(
-        width: width == double.infinity ? null : width,
-        height: height,
-        decoration: BoxDecoration(
-          color: Colors.grey.shade300,
-          borderRadius: BorderRadius.circular(radius),
-        ),
-      );
+    width: width == double.infinity ? null : width,
+    height: height,
+    decoration: BoxDecoration(
+      color: Colors.grey.shade300,
+      borderRadius: BorderRadius.circular(radius),
+    ),
+  );
 }

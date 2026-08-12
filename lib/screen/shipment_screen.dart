@@ -1,7 +1,11 @@
+import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
+import 'package:delivery_boy_app/utils/delivery_day.dart';
+import 'package:delivery_boy_app/widgets/driver_pay_row.dart';
+import 'package:delivery_boy_app/widgets/order_title.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -39,38 +43,46 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
     context.read<DeliveryProvider>().refreshCompletedOrders(token: token);
   }
 
-  // Returns the start of the window for the selected period (UTC-normalised).
-  DateTime _periodStart(DateTime now) {
-    final today = DateUtils.dateOnly(now);
+  // Returns the start of the window for the selected period, on the driver's
+  // own clock — the same day boundary the Done tab resets on.
+  DateTime _periodStart() {
+    final start = driverToday();
     switch (_period) {
       case 'Week':
-        return today.subtract(Duration(days: today.weekday - 1));
+        return start.subtract(Duration(days: start.weekday - 1));
       case 'Month':
-        return DateTime(today.year, today.month, 1);
+        return DateTime(start.year, start.month, 1);
       default: // 'Day'
-        return today;
+        return start;
     }
   }
 
   // Orders that fall within the selected period.
+  //
+  // An order with no completion time is one from a backend predating the
+  // delivered_at column; it is counted in whatever period is on screen rather
+  // than being dropped from the history altogether.
   List<OrderModel> _filtered(List<OrderModel> all) {
-    final start = _periodStart(DateTime.now());
+    final start = _periodStart();
     return all.where((o) {
-      final date = DateUtils.dateOnly(o.deliveredAt ?? DateTime.now());
+      final date = deliveryDayOf(o) ?? driverToday();
       return !date.isBefore(start);
     }).toList();
   }
 
   // Groups orders by their delivery date, newest first.
   // Returns a list of (dateLabel, orders) pairs.
-  List<MapEntry<String, List<OrderModel>>> _grouped(List<OrderModel> all) {
-    final now = DateTime.now();
-    final today = DateUtils.dateOnly(now);
-    final yesterday = today.subtract(const Duration(days: 1));
+  List<MapEntry<String, List<OrderModel>>> _grouped(
+    BuildContext context,
+    List<OrderModel> all,
+  ) {
+    final l10n = context.l10n;
+    final currentDay = driverToday();
+    final yesterday = currentDay.subtract(const Duration(days: 1));
 
     final Map<DateTime, List<OrderModel>> map = {};
     for (final o in all) {
-      final key = DateUtils.dateOnly(o.deliveredAt ?? now);
+      final key = deliveryDayOf(o) ?? currentDay;
       map.putIfAbsent(key, () => []).add(o);
     }
 
@@ -78,16 +90,12 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
 
     return sorted.map((date) {
       String label;
-      if (date == today) {
-        label = 'Today';
+      if (date == currentDay) {
+        label = l10n.today;
       } else if (date == yesterday) {
-        label = 'Yesterday';
+        label = l10n.yesterday;
       } else {
-        final months = [
-          'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-        ];
-        label = '${months[date.month - 1]} ${date.day}';
+        label = '${l10n.shortMonths[date.month - 1]} ${date.day}';
       }
       return MapEntry(label, map[date]!);
     }).toList();
@@ -95,15 +103,16 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final delivery = context.watch<DeliveryProvider>();
     final completedOrders = delivery.completedOrders;
 
     return Scaffold(
       backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: const Text(
-          'Shipment',
-          style: TextStyle(fontWeight: FontWeight.bold),
+        title: Text(
+          l10n.shipmentTitle,
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
@@ -118,13 +127,14 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
                 .refreshCompletedOrders(token: token);
           }
         },
-        child: _buildBody(delivery, completedOrders),
+        child: _buildBody(context, delivery, completedOrders),
       ),
     );
   }
 
-  Widget _buildBody(
-      DeliveryProvider delivery, List<OrderModel> completedOrders) {
+  Widget _buildBody(BuildContext context, DeliveryProvider delivery,
+      List<OrderModel> completedOrders) {
+    final l10n = context.l10n;
     if (delivery.isLoadingCompleted) {
       return const _SkeletonList();
     }
@@ -153,7 +163,7 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
                       .refreshCompletedOrders(token: token);
                 }
               },
-              child: const Text('Retry'),
+              child: Text(l10n.retry),
             ),
           ),
         ],
@@ -161,7 +171,7 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
     }
 
     final filtered = _filtered(completedOrders);
-    final groups = _grouped(completedOrders);
+    final groups = _grouped(context, completedOrders);
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -176,9 +186,9 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
         const SizedBox(height: 24),
 
         // ── History Section Header ────────────────────────────────────
-        const Text(
-          'Delivery History',
-          style: TextStyle(
+        Text(
+          l10n.deliveryHistory,
+          style: const TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
             color: Colors.black87,
@@ -191,19 +201,19 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
           const Icon(Icons.local_shipping_outlined,
               size: 64, color: Colors.black12),
           const SizedBox(height: 12),
-          const Text(
-            'No deliveries yet',
+          Text(
+            l10n.noDeliveriesYet,
             textAlign: TextAlign.center,
-            style: TextStyle(
+            style: const TextStyle(
                 color: Colors.black38,
                 fontSize: 16,
                 fontWeight: FontWeight.w500),
           ),
           const SizedBox(height: 6),
-          const Text(
-            'Completed deliveries will appear here',
+          Text(
+            l10n.completedWillAppearHere,
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.black26, fontSize: 13),
+            style: const TextStyle(color: Colors.black26, fontSize: 13),
           ),
         ] else ...[
           for (final group in groups) ...[
@@ -236,8 +246,11 @@ class _EarningsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Only cash-on-delivery money counts as earned: an order the customer
+    // paid online contributes 0, otherwise the same payment would show up
+    // both in the store's takings and in the driver's total.
     final total =
-        filteredOrders.fold<int>(0, (sum, o) => sum + o.price);
+        filteredOrders.fold<int>(0, (sum, o) => sum + o.earnedPrice);
     final count = filteredOrders.length;
 
     return Container(
@@ -271,46 +284,67 @@ class _EarningsCard extends StatelessWidget {
                 ),
               ],
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
+            child: Column(
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Total Earned',
-                      style: TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                    Text(
-                      '\$$total',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        height: 1.1,
-                      ),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                Column(
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    const Text(
-                      'Deliveries',
-                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          context.l10n.totalEarned,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                        Text(
+                          '\$$total',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                            height: 1.1,
+                          ),
+                        ),
+                      ],
                     ),
-                    Text(
-                      '$count',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                        height: 1.1,
-                      ),
+                    const Spacer(),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          context.l10n.deliveries,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                        Text(
+                          '$count',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            height: 1.1,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
+
+                // ── The driver's own pay ────────────────────────────────
+                // Sits under the collected total, on the same red stripe,
+                // because the two answer different questions: what is in the
+                // driver's pocket for the store, and what the store owes the
+                // driver for carrying it. Follows the period toggle below, so
+                // Week shows the fees earned this week.
+                const SizedBox(height: 14),
+                const Divider(color: Colors.white24, height: 1, thickness: 1),
+                const SizedBox(height: 12),
+                DriverPayRow(count: count),
               ],
             ),
           ),
@@ -337,7 +371,15 @@ class _PeriodToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    // The values stay English because _period drives date maths elsewhere;
+    // only the visible label is translated.
     const periods = ['Day', 'Week', 'Month'];
+    final labels = {
+      'Day': l10n.periodDay,
+      'Week': l10n.periodWeek,
+      'Month': l10n.periodMonth,
+    };
     return Container(
       decoration: BoxDecoration(
         color: backgroundColor,
@@ -358,7 +400,7 @@ class _PeriodToggle extends StatelessWidget {
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
-                        p,
+                        labels[p]!,
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: selected == p
@@ -442,15 +484,7 @@ class _HistoryCard extends StatelessWidget {
                 Icon(Icons.check_circle_outline,
                     size: 18, color: Colors.green.shade600),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    order.item,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 15),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
+                Expanded(child: OrderTitle(order: order)),
                 const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -461,7 +495,7 @@ class _HistoryCard extends StatelessWidget {
                     border: Border.all(color: Colors.green.shade300),
                   ),
                   child: Text(
-                    'Delivered',
+                    context.l10n.statusDelivered,
                     style: TextStyle(
                       color: Colors.green.shade700,
                       fontSize: 11,
@@ -500,13 +534,32 @@ class _HistoryCard extends StatelessWidget {
                       const TextStyle(fontSize: 13, color: Colors.black54),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  '\$${order.price}',
-                  style: TextStyle(
-                    color: buttonMainColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
+                // The amount shown is what the driver collected, matching the
+                // earnings card above: $0 for an order paid online, with the
+                // order's own price kept visible underneath so the card still
+                // says what the delivery was worth.
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '\$${order.earnedPrice}',
+                      style: TextStyle(
+                        color: order.isPrepaid
+                            ? Colors.black38
+                            : buttonMainColor,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if (order.isPrepaid)
+                      Text(
+                        '\$${order.price} ${context.l10n.prepaid.toLowerCase()}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.black38,
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),
@@ -527,8 +580,9 @@ class _SkeletonList extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
       children: [
-        // Earnings card skeleton
-        _SkeletonBox(height: 140, radius: 16),
+        // Earnings card skeleton — tall enough for the collected total, the
+        // driver's own pay under it, and the period toggle.
+        _SkeletonBox(height: 200, radius: 16),
         const SizedBox(height: 24),
         _SkeletonBox(height: 18, width: 120),
         const SizedBox(height: 12),

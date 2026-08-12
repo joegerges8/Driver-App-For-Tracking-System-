@@ -1,9 +1,11 @@
+import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/screen/driver_home_screen.dart';
 import 'package:delivery_boy_app/screen/orders_screen.dart';
 import 'package:delivery_boy_app/screen/profile_screen.dart';
 import 'package:delivery_boy_app/screen/shipment_screen.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
+import 'package:delivery_boy_app/services/background_location_service.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -16,7 +18,11 @@ class AppMainScreen extends StatefulWidget {
   State<AppMainScreen> createState() => _AppMainScreenState();
 }
 
-class _AppMainScreenState extends State<AppMainScreen> {
+// WidgetsBindingObserver lets this screen hear about the app being sent to the
+// background and brought back, which is when the driver's order list is most
+// likely to be out of date with the dashboard.
+class _AppMainScreenState extends State<AppMainScreen>
+    with WidgetsBindingObserver {
   // IndexedStack keeps all pages alive so state (map, orders) is preserved on tab switch.
   // ProfileScreen replaces the old Center(child: Text("Profile")) placeholder.
   final List<Widget> pages = [
@@ -33,9 +39,74 @@ class _AppMainScreenState extends State<AppMainScreen> {
     FontAwesomeIcons.truckFast,
     FontAwesomeIcons.solidCircleUser,
   ];
-  final List<String> _labels = ["Home", "Orders", "Shipment", "Profile"];
+  // Labels are resolved inside build() rather than stored in a field so they
+  // follow the language toggle instead of freezing at whatever was active when
+  // the state object was first created.
+  List<String> _labels(BuildContext context) {
+    final l10n = context.l10n;
+    return [l10n.navHome, l10n.navOrders, l10n.navShipment, l10n.navProfile];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Start polling after the first frame, once providers can be read.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startAutoRefresh());
+  }
+
+  // Held so dispose can stop the timer without reading a provider off a
+  // context that is already being torn down (logout unmounts this screen).
+  DeliveryProvider? _delivery;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _delivery = context.read<DeliveryProvider>();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _delivery?.stopAutoRefresh();
+    super.dispose();
+  }
+
+  // Polls only while the app is actually on screen. Coming back from the
+  // background refreshes immediately, so an order deleted from the dashboard
+  // while the driver was in Maps is gone the moment they switch back.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (!mounted) return;
+
+    if (state == AppLifecycleState.resumed) {
+      _startAutoRefresh();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _delivery?.stopAutoRefresh();
+    }
+  }
+
+  void _startAutoRefresh() {
+    if (!mounted) return;
+    final token = context.read<AuthProvider>().token;
+    if (token == null || token.isEmpty) return;
+    context.read<DeliveryProvider>().startAutoRefresh(token: token);
+
+    // The polling above stops the moment this screen leaves the driver's
+    // display. The service is the half that keeps watching while the app is
+    // merely put away — it is what notices the dispatcher marking an order
+    // PICKED_UP and starts sharing location for it, without the driver having
+    // to be looking at anything. It lives exactly as long as the app does:
+    // swiping the app away from recents ends it. Starting it here covers
+    // logging in and reopening alike, and does nothing if it already runs.
+    BackgroundLocationService.startWatching();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final labels = _labels(context);
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: pages),
       bottomNavigationBar: Container(
@@ -90,7 +161,7 @@ class _AppMainScreenState extends State<AppMainScreen> {
                     ),
                   ),
                   Text(
-                    _labels[index],
+                    labels[index],
                     style: TextStyle(
                       color: isSelected ? buttonMainColor : Colors.black,
                     ),
