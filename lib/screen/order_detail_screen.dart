@@ -451,7 +451,12 @@ class OrderDetailScreen extends StatelessWidget {
   // Starts the delivery: stamps the driver's current position as the pickup
   // point and kicks off background GPS sharing for this order. The screen
   // stays where it is — only the buttons at the bottom change.
-  void _startDelivery(BuildContext context) {
+  //
+  // An order coming back out of the Returned tab is the one case that needs
+  // the backend: it is closed there, so nothing about the restart would stick
+  // until it is re-opened. That is the only failure this can report.
+  Future<void> _startDelivery(BuildContext context) async {
+    final l10n = context.l10n;
     final loc = context.read<CurrentLocationProvider>();
     if (loc.isLoading) {
       showAppSnackbar(
@@ -474,9 +479,23 @@ class OrderDetailScreen extends StatelessWidget {
     // "Start Delivery" to the returned/delivered pair already says the tap
     // landed, and drivers found being told their location is being shared —
     // every single time they start an order — worth removing.
-    context
-        .read<DeliveryProvider>()
-        .startDelivery(driverLocation: loc.currentLocation);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<DeliveryProvider>().startDelivery(
+        driverLocation: loc.currentLocation,
+        token: context.read<AuthProvider>().token ?? '',
+      );
+    } catch (e) {
+      // The provider has already put the order back in the Returned tab, so
+      // the screen matches what the backend holds — the driver taps again
+      // rather than setting off on a delivery nobody can see.
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(l10n.statusSyncFailed('$e')),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   // Closes out the order as either delivered or returned, then goes back to

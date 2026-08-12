@@ -39,6 +39,14 @@ const _backendOpenKey = 'bg_backend_open_ids';
 // on posting to production.
 String get _baseUrl => ApiConfig.baseUrl;
 
+// Every request here gets a deadline, for the same reason ApiClient's do: the
+// http package has none, and a connection the phone drops without closing
+// leaves a request hanging forever. A tick that never finishes is a tick whose
+// GPS never gets posted, so this is what keeps a delivery streaming through a
+// dead spot rather than going quiet until the app is restarted. Shorter than
+// the UI's twenty seconds because these run on a 15-second tick.
+const Duration _requestTimeout = Duration(seconds: 12);
+
 // The foreground-service notification, cut down to the least Android will
 // accept. GPS that survives the app being backgrounded or force-killed has to
 // run in a foreground service, and Android has required every foreground
@@ -314,7 +322,7 @@ void _onStart(ServiceInstance service) async {
               'latitude': position.latitude,
               'longitude': position.longitude,
             }),
-          ),
+          ).timeout(_requestTimeout),
         ),
       );
 
@@ -360,7 +368,7 @@ Future<void> _postDriverLocation(String token, Position position) async {
         'latitude': position.latitude,
         'longitude': position.longitude,
       }),
-    );
+    ).timeout(_requestTimeout);
   } catch (_) {
     // Silent — a missed dispatcher update is acceptable.
   }
@@ -382,7 +390,7 @@ Future<void> _refreshBackendOrders(
     final response = await http.get(
       Uri.parse('$_baseUrl/api/drivers/me/orders'),
       headers: {'Authorization': 'Bearer $token'},
-    );
+    ).timeout(_requestTimeout);
 
     if (response.statusCode != 200) return;
 
