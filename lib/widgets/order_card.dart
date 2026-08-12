@@ -7,6 +7,7 @@ import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:delivery_boy_app/utils/phone.dart';
 import 'package:delivery_boy_app/utils/utils.dart';
 import 'package:delivery_boy_app/widgets/custom_button.dart';
+import 'package:delivery_boy_app/widgets/order_title.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -80,17 +81,13 @@ class OrderCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    // Just the order number. A "* 1" used to trail it, printed
-                    // from an OrderModel.quantity field that was hardcoded to 1
-                    // and never reflected what was in the order; the real
+                    // The order number and the store it came from. A "* 1"
+                    // used to trail the number, printed from an
+                    // OrderModel.quantity field that was hardcoded to 1 and
+                    // never reflected what was in the order; the real
                     // per-product counts live on the order detail screen.
-                    Text(
-                      order.item,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w500,
-                        fontSize: 15,
-                      ),
-                    ),
+                    Expanded(child: OrderTitle(order: order)),
+                    const SizedBox(width: 8),
                   ],
                 ),
               ),
