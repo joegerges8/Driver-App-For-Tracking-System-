@@ -20,6 +20,15 @@
 //
 // The matching lives here rather than inside the orders screen so it can be
 // tested on its own, and so the screen is left holding only the text field.
+// How a phone number is reduced to the part that identifies it lives one file
+// over, in utils/phone.dart, since the order cards need the same rules to
+// print a number as the search needs to compare one.
+
+import 'package:delivery_boy_app/utils/phone.dart';
+
+// Callers of the search should not have to know that the phone rules live
+// elsewhere; normalizePhone reads as part of this API.
+export 'package:delivery_boy_app/utils/phone.dart' show normalizePhone;
 
 /// Reduces typed text to the part worth comparing: no '#', no whitespace, all
 /// lowercase.
@@ -29,29 +38,6 @@
 /// rather than as a search that happens to match nothing.
 String normalizeOrderQuery(String raw) =>
     raw.replaceAll(RegExp(r'[\s#]'), '').toLowerCase();
-
-/// Reduces a phone number — stored or typed — to its national digits.
-///
-/// Everything that is formatting rather than identity comes off: '+', spaces,
-/// dashes and brackets, then the '00' international prefix, then Lebanon's
-/// '961' country code, then the trunk '0' that the local form carries and the
-/// international form drops. What is left is the same string whichever way the
-/// number was written, which is the whole point — '+961 70 218 542',
-/// '0096170218542' and '70218542' all reduce to '70218542'.
-///
-/// A query holding only a country code ('+961') reduces to nothing, and
-/// callers read that as a search the driver has not finished typing rather
-/// than as one that matched nothing.
-String normalizePhone(String raw) {
-  var digits = raw.replaceAll(RegExp(r'\D'), '');
-
-  if (digits.startsWith('00')) digits = digits.substring(2);
-  if (digits.startsWith('961')) digits = digits.substring(3);
-
-  // Local numbers are written with a trunk zero ('03 123 456') that the
-  // international form leaves out, so it cannot be part of what is compared.
-  return digits.replaceFirst(RegExp(r'^0+'), '');
-}
 
 /// Whether [phone] is the number the driver meant by [query].
 ///
