@@ -3,9 +3,11 @@ import 'package:delivery_boy_app/screen/driver_home_screen.dart';
 import 'package:delivery_boy_app/screen/orders_screen.dart';
 import 'package:delivery_boy_app/screen/profile_screen.dart';
 import 'package:delivery_boy_app/screen/shipment_screen.dart';
+import 'package:delivery_boy_app/screen/tracking_setup_screen.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/services/background_location_service.dart';
+import 'package:delivery_boy_app/services/tracking_permissions.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -52,7 +54,10 @@ class _AppMainScreenState extends State<AppMainScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     // Start polling after the first frame, once providers can be read.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _startAutoRefresh());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _startAutoRefresh();
+      _refreshTrackingReadiness();
+    });
   }
 
   // Held so dispose can stop the timer without reading a provider off a
@@ -82,6 +87,11 @@ class _AppMainScreenState extends State<AppMainScreen>
 
     if (state == AppLifecycleState.resumed) {
       _startAutoRefresh();
+      // Coming back is also when the answer is most likely to have changed:
+      // the driver may have just been in Android's settings, or may have been
+      // away long enough for the service to have been killed and started
+      // failing.
+      _refreshTrackingReadiness();
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _delivery?.stopAutoRefresh();
@@ -96,19 +106,47 @@ class _AppMainScreenState extends State<AppMainScreen>
 
     // The polling above stops the moment this screen leaves the driver's
     // display. The service is the half that keeps watching while the app is
-    // merely put away — it is what notices the dispatcher marking an order
-    // PICKED_UP and starts sharing location for it, without the driver having
-    // to be looking at anything. It lives exactly as long as the app does:
-    // swiping the app away from recents ends it. Starting it here covers
-    // logging in and reopening alike, and does nothing if it already runs.
+    // merely put away — it is what keeps a started delivery streaming to the
+    // customer while the driver is in Maps, and what keeps the driver on the
+    // dispatcher's map the rest of the time. Starting it here covers logging in
+    // and reopening alike, and does nothing if it already runs.
     BackgroundLocationService.startWatching();
+  }
+
+  // ── Tracking health ───────────────────────────────────────────────────────
+  // Whether the phone is set up to let a backgrounded delivery keep reporting,
+  // and whether it has in fact stopped. Null until the first check comes back,
+  // which is what keeps the banner from flashing on at launch.
+  TrackingReadiness? _tracking;
+
+  Future<void> _refreshTrackingReadiness() async {
+    final readiness = await TrackingPermissions.check();
+    if (!mounted) return;
+    setState(() => _tracking = readiness);
+  }
+
+  Future<void> _openTrackingSetup() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const TrackingSetupScreen()),
+    );
+    await _refreshTrackingReadiness();
   }
 
   @override
   Widget build(BuildContext context) {
     final labels = _labels(context);
     return Scaffold(
-      body: IndexedStack(index: _currentIndex, children: pages),
+      body: Column(
+        children: [
+          _TrackingBanner(
+            readiness: _tracking,
+            onTap: _openTrackingSetup,
+          ),
+          Expanded(
+            child: IndexedStack(index: _currentIndex, children: pages),
+          ),
+        ],
+      ),
       bottomNavigationBar: Container(
         padding: EdgeInsets.only(top: 10, bottom: 20),
         decoration: BoxDecoration(
@@ -171,6 +209,80 @@ class _AppMainScreenState extends State<AppMainScreen>
               ),
             );
           }),
+        ),
+      ),
+    );
+  }
+}
+
+/// Sits above every tab whenever the driver's location is at risk of stopping,
+/// or has already stopped.
+///
+/// It is deliberately unmissable and deliberately not a dialog. The failure it
+/// warns about is silent by nature — the app keeps working, the orders keep
+/// listing, and the only symptom is a dispatcher who cannot see the driver and
+/// a customer watching a marker that never moves. A driver who does not know
+/// something is wrong cannot go and fix it, and nobody else can fix it for them.
+class _TrackingBanner extends StatelessWidget {
+  const _TrackingBanner({required this.readiness, required this.onTap});
+
+  final TrackingReadiness? readiness;
+  final Future<void> Function() onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final state = readiness;
+    if (state == null || !state.needsAttention) return const SizedBox.shrink();
+
+    final l10n = context.l10n;
+
+    // Two different messages for two different situations. "Might stop" is a
+    // setup the driver has not finished; "has stopped" is the service having
+    // actually gone quiet, which is more urgent and worth the stronger colour.
+    final stopped = state.isFailing;
+    final background = stopped ? buttonMainColor : pickedUpColor;
+
+    return Material(
+      color: background,
+      child: InkWell(
+        onTap: onTap,
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                Icon(
+                  stopped ? Icons.location_off : Icons.warning_amber_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    stopped
+                        ? l10n.trackingBannerStopped
+                        : l10n.trackingBannerIncomplete,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  l10n.trackingBannerFix,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    decoration: TextDecoration.underline,
+                    decorationColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
