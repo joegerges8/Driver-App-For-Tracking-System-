@@ -7,7 +7,22 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Deliberately removed rather than simply left undeclared.
+         flutter_background_service declares POST_NOTIFICATIONS in its own
+         manifest, and the merger would pull it into this app; tools:node="remove"
+         strips it back out.
+
+         On Android 13+ a foreground service's notification obeys this
+         permission: without it the notice never appears in the drawer, while the
+         service itself keeps running. That is the only way to get the
+         notification off the shade — Android has no flag for hiding it, and the
+         service cannot be dropped without losing background GPS entirely.
+
+         See createNotificationChannel() in MainActivity.kt for the Android 8–12
+         half of this (a channel at IMPORTANCE_NONE) and for what remains
+         visible regardless. Nothing else in this app posts notifications, so
+         removing the permission costs nothing further. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" tools:node="remove"/>
     <!-- Keeps the CPU awake long enough for the 15-second GPS read and POST to
          finish while the screen is off. Without it Doze can suspend the isolate
          mid-tick, which looks exactly like the driver having stopped moving. -->

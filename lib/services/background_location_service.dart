@@ -51,24 +51,23 @@ String get _baseUrl => ApiConfig.baseUrl;
 // the UI's twenty seconds because these run on a 15-second tick.
 const Duration _requestTimeout = Duration(seconds: 12);
 
-// The foreground-service notification. Android has required every foreground
-// service to post one since Oreo, and this app now leans on that rather than
-// hiding from it: the notification is the only thing that tells a driver in the
-// field whether their location is still reaching the dispatcher.
+// The foreground-service notification, which is configured never to be
+// displayed. Android has required every foreground service to post one since
+// Oreo and offers no flag to remove it, so the notice still exists — it is
+// suppressed instead, by removing POST_NOTIFICATIONS on Android 13+ and by
+// creating the channel at IMPORTANCE_NONE below that. See
+// createNotificationChannel() in MainActivity.kt for the full reasoning.
 //
-// An earlier build ran the channel at IMPORTANCE_MIN with VISIBILITY_SECRET so
-// it carried no status-bar icon and no lock-screen entry. That made the failure
-// this whole change is about undiagnosable — on a phone whose vendor had
-// stopped the service, the notification the driver never saw simply stopped
-// being there, and the first anyone knew was a customer ringing to ask where
-// their order was. It is now IMPORTANCE_LOW (see MainActivity.kt): still
-// silent, no sound, no vibration, no badge, but visible, and its text is
-// rewritten every tick with the time of the last successful fix or a warning.
+// The text set on it each tick is therefore invisible in normal use. It is kept
+// because it costs nothing and is the only thing that explains the service if a
+// driver ever re-enables notifications for the app, or looks at it through
+// Android's Task Manager — which stays visible whatever this channel says.
 //
 // The channel id is versioned because a channel's importance is fixed at
-// creation, so raising it on a phone that already ran an older build is a no-op
-// unless the id changes. Must match LOCATION_CHANNEL_ID in MainActivity.kt.
-const _notificationChannelId = 'driver_location_channel_v3';
+// creation, so lowering it on a phone that already ran an older build is a
+// no-op unless the id changes. Must match LOCATION_CHANNEL_ID in
+// MainActivity.kt.
+const _notificationChannelId = 'driver_location_channel_v4';
 const _notificationTitle = 'Driver App';
 
 // Consecutive ticks that failed to report a position, shared with the UI
@@ -447,11 +446,12 @@ Map<String, dynamic> _locationBody(Position position) => {
 
 /// Records the outcome of a tick and rewrites the notification to match.
 ///
-/// The streak is what the home screen reads to decide whether to put the
-/// tracking setup screen back in front of the driver, and the notification text
-/// is what the driver themselves sees. Both exist for the same reason: on a
-/// phone whose vendor has throttled the app, everything looks fine right up
-/// until a customer calls to ask where their order is.
+/// The streak is the part that matters now: it is what AppMainScreen reads to
+/// decide whether to put the warning banner and the tracking setup screen back
+/// in front of the driver. With the notification suppressed (see
+/// [_notificationChannelId]) that banner is the only way a stalled service ever
+/// surfaces, and it only surfaces once the driver opens the app — so the streak
+/// is written on every tick regardless of whether anything can display it.
 Future<void> _recordTick(
   ServiceInstance service,
   SharedPreferences prefs, {

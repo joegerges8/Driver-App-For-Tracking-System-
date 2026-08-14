@@ -1,20 +1,16 @@
 package com.example.delivery_boy_app
 
-import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -26,13 +22,14 @@ class MainActivity : FlutterActivity() {
         // the only way to change how the notification behaves on a phone that
         // already ran an older build is to leave the old channel behind and
         // make a new one.
-        private const val LOCATION_CHANNEL_ID = "driver_location_channel_v3"
+        private const val LOCATION_CHANNEL_ID = "driver_location_channel_v4"
 
         // Channels earlier builds created. Deleted so they stop showing up as
         // leftover entries in the app's notification settings.
         private val OBSOLETE_CHANNEL_IDS = listOf(
             "driver_location_channel",
             "driver_location_channel_v2",
+            "driver_location_channel_v3",
         )
 
         // Must match _channelName in lib/services/device_power_settings.dart.
@@ -99,7 +96,6 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         createNotificationChannel()
-        requestNotificationPermission()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -122,24 +118,39 @@ class MainActivity : FlutterActivity() {
             }
     }
 
-    // Android will not let a location foreground service run without a visible
-    // notification, and on Infinix/Tecno that turns out to be a feature rather
-    // than a nuisance: a notification the driver can actually see is the only
-    // in-the-field signal that tracking is still alive. An earlier build ran
-    // this channel at IMPORTANCE_MIN with VISIBILITY_SECRET to keep it out of
-    // the way, which meant a driver whose service had been killed by the
-    // vendor's power manager had no way to tell — the notification they never
-    // saw simply stopped being there.
+    // Keeps the foreground service's notification out of the notification
+    // shade entirely.
     //
-    // IMPORTANCE_LOW is the quietest setting that still shows a status-bar icon
-    // and a shade entry. Sound, vibration and the launcher badge stay off, so
-    // it is silent; it is just no longer invisible. The service updates its text
-    // every tick (see background_location_service.dart) so the line doubles as a
-    // health readout: the time of the last fix, or a warning if fixes stopped.
+    // Android will not run a location foreground service without one — that is
+    // an OS rule with no flag to disable it, and the service is the only way to
+    // report GPS while the app is off screen. What *can* be controlled is
+    // whether the notice is ever displayed, and there are two levers, one per
+    // Android generation:
+    //
+    //  - Android 13+ (TIRAMISU): foreground-service notices obey the
+    //    POST_NOTIFICATIONS permission. The manifest removes that permission
+    //    outright, so the notice never reaches the drawer while the service
+    //    carries on running.
+    //  - Android 8–12: no such permission exists, but a channel created at
+    //    IMPORTANCE_NONE is a blocked channel, and nothing posted to it is
+    //    shown.
+    //
+    // Together these cover every version this app supports (minSdk 24).
+    //
+    // What this cannot hide, on any version: the system's own "active apps" /
+    // Task Manager list, reachable from the quick-settings shade on Android
+    // 13+. Android deliberately gives the user an unremovable way to see what
+    // is holding the CPU and the GPS, and no app can opt out of it.
+    //
+    // The cost is that the driver loses their only in-the-field signal that
+    // tracking is alive — the notification used to carry the time of the last
+    // fix. Detecting a stall now rests entirely on the failure streak the
+    // service records and the banner AppMainScreen shows for it, which the
+    // driver only sees once they open the app.
     //
     // Created here rather than left to the plugin because whichever call runs
     // first decides the channel's settings, and MainActivity.onCreate runs at
-    // app launch, well before the driver taps Start Delivery.
+    // app launch, well before the service starts.
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
@@ -150,31 +161,17 @@ class MainActivity : FlutterActivity() {
         val channel = NotificationChannel(
             LOCATION_CHANNEL_ID,
             "Location sharing",
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_NONE
         ).apply {
-            description = "Shows that your location is reaching the dispatcher while you deliver."
+            description = "Required by Android while the app shares your location."
             setShowBadge(false)
             setSound(null, null)
             enableVibration(false)
             enableLights(false)
-            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            lockscreenVisibility = android.app.Notification.VISIBILITY_SECRET
         }
 
         manager.createNotificationChannel(channel)
-    }
-
-    private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    1001
-                )
-            }
-        }
     }
 
     // ── Power management ────────────────────────────────────────────────────
