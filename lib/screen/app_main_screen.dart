@@ -142,6 +142,7 @@ class _AppMainScreenState extends State<AppMainScreen>
             readiness: _tracking,
             onTap: _openTrackingSetup,
           ),
+          const _PendingSyncBanner(),
           Expanded(
             child: IndexedStack(index: _currentIndex, children: pages),
           ),
@@ -223,6 +224,66 @@ class _AppMainScreenState extends State<AppMainScreen>
 /// listing, and the only symptom is a dispatcher who cannot see the driver and
 /// a customer watching a marker that never moves. A driver who does not know
 /// something is wrong cannot go and fix it, and nobody else can fix it for them.
+/// Shown while a delivery the driver has finished has not reached the
+/// dashboard yet.
+///
+/// The app takes the outcome the moment it is tapped and sends it whenever it
+/// can, so nothing is lost either way — but a driver who marked an order
+/// delivered in a dead spot deserves to know the dispatcher cannot see it yet.
+/// Without this, the only difference between a delivery that synced and one
+/// that did not is invisible on the phone, which is exactly how an order ends
+/// up being asked about hours later.
+///
+/// Tapping it tries again straight away rather than waiting for the next poll,
+/// which is what a driver who has just walked back into signal will do.
+class _PendingSyncBanner extends StatelessWidget {
+  const _PendingSyncBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final count = context.watch<DeliveryProvider>().pendingSyncCount;
+    if (count == 0) return const SizedBox.shrink();
+
+    final l10n = context.l10n;
+
+    return Material(
+      color: pickedUpColor,
+      child: InkWell(
+        onTap: () {
+          final token = context.read<AuthProvider>().token ?? '';
+          context.read<DeliveryProvider>().flushPendingStatuses(token: token);
+        },
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.cloud_upload_outlined,
+                  color: Colors.white,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    l10n.pendingSyncBanner(count),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _TrackingBanner extends StatelessWidget {
   const _TrackingBanner({required this.readiness, required this.onTap});
 

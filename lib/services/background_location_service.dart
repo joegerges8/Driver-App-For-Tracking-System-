@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:delivery_boy_app/services/api_config.dart';
+import 'package:delivery_boy_app/services/pending_status_queue.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
@@ -315,6 +316,15 @@ void _onStart(ServiceInstance service) async {
       return;
     }
 
+    // Deliveries the driver finished with no signal, sent before anything
+    // else. This is the half of the retry that does not need the app to be
+    // open: a driver who marks the last order of the day delivered in a
+    // basement and then puts the phone away never reopens the app, and the
+    // dispatcher would be left looking at an order that was delivered hours
+    // ago. Runs every tick — it costs nothing when the queue is empty, which
+    // is almost always.
+    await _flushPendingStatuses(prefs, token);
+
     if (tick % 2 == 0) await _refreshBackendOrders(prefs, token);
     tick++;
 
@@ -527,6 +537,55 @@ Future<bool> _postDriverLocation(String token, Position position) async {
     return response.statusCode >= 200 && response.statusCode < 300;
   } catch (_) {
     return false;
+  }
+}
+
+/// Sends every delivery outcome still sitting in the outbox.
+///
+/// The same queue the app flushes (DeliveryProvider.flushPendingStatuses) and
+/// the same rules: an entry leaves the queue when the backend accepts it, or
+/// when the backend refuses it in a way that will not change. Anything else
+/// stops the round — they all go to one server, so if one cannot reach it
+/// neither can the rest.
+///
+/// Sending the same outcome twice is harmless. Both isolates may flush at once
+/// when the app is open, and the backend simply writes the status and the
+/// timestamp it is given again — the timestamp travels with the entry, so a
+/// second write lands on the same value as the first.
+Future<void> _flushPendingStatuses(
+  SharedPreferences prefs,
+  String token,
+) async {
+  // prefs has already been reloaded by the caller this tick, so what is read
+  // here includes anything the app queued while the service was between ticks.
+  final pending = await PendingStatusQueue.load(prefs: prefs);
+  if (pending.isEmpty) return;
+
+  for (final change in pending) {
+    try {
+      final response = await http.patch(
+        Uri.parse('$_baseUrl/api/drivers/me/orders/${change.orderId}/status'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'status': change.status,
+          'occurred_at': change.occurredAt.toUtc().toIso8601String(),
+        }),
+      ).timeout(_requestTimeout);
+
+      final code = response.statusCode;
+      if (code >= 200 && code < 300) {
+        await PendingStatusQueue.remove(change.orderId, prefs);
+        continue;
+      }
+
+      if (isRetryableStatusCode(code)) return; // the next tick tries again
+      await PendingStatusQueue.remove(change.orderId, prefs);
+    } catch (_) {
+      return; // no connection — the queue is exactly where it should be
+    }
   }
 }
 
