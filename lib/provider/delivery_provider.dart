@@ -27,6 +27,11 @@
 // makes the driver's marker appear on the customer's tracking page, while the
 // coordinates themselves are posted by the background location service that
 // starts the moment the driver taps "Start Delivery".
+//
+// Starting a delivery does post one thing to the backend: the time it happened
+// (POST /me/orders/:id/start). That is the clock the dispatcher's "avg to
+// deliver" runs on, and it is a timestamp only — the order's status is left
+// exactly where the dispatcher put it.
 
 import 'dart:async';
 
@@ -748,7 +753,16 @@ class DeliveryProvider extends ChangeNotifier {
 
     notifyListeners();
 
-    if (!isRestart || order.id.isEmpty || token.isEmpty) return;
+    if (order.id.isEmpty || token.isEmpty) return;
+
+    // An ordinary start tells the backend one thing and changes nothing else:
+    // the moment the driver set off, which is what the dispatcher's average
+    // delivery time is measured from. It cannot fail loudly — see
+    // ApiClient.startOrderDelivery.
+    if (!isRestart) {
+      await ApiClient.startOrderDelivery(token: token, orderId: order.id);
+      return;
+    }
 
     _reopeningIds.add(order.id);
     try {
@@ -767,6 +781,11 @@ class DeliveryProvider extends ChangeNotifier {
       _undoRestart(order, previousStatus);
       rethrow;
     }
+
+    // After the re-open, never before: re-opening the order clears the trip
+    // that ended in a return, and it is this trip — the one going out now —
+    // that the delivery is timed from.
+    await ApiClient.startOrderDelivery(token: token, orderId: order.id);
   }
 
   // Puts a finished order that failed to re-open back where the driver found

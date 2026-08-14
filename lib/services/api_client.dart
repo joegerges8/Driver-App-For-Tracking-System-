@@ -237,6 +237,32 @@ class ApiClient {
     }
   }
 
+  // Tells the backend the driver has set off with this order, which is what
+  // the dispatcher's "avg to deliver" is measured from — without it the only
+  // start time the dashboard had was when Shopify created the order, so an
+  // order that sat at the shop overnight read as an overnight delivery.
+  //
+  // Sends the time only: the order's status is the dispatcher's to move, and
+  // starting a delivery has never changed it. Failures are swallowed for the
+  // same reason GPS pings are — the driver is on their way either way, and one
+  // missing stamp costs one order's place in an average, nothing more.
+  static Future<void> startOrderDelivery({
+    required String token,
+    required String orderId,
+  }) async {
+    try {
+      await _send(http.post(
+        _uri('/api/drivers/me/orders/$orderId/start'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      ));
+    } catch (_) {
+      // Silent by design — see above.
+    }
+  }
+
   static Future<void> updateOrderStatus({
     required String token,
     required String orderId,
