@@ -1,5 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+// Directly rather than through WidgetsBinding: this isolate has no widget
+// binding, so PlatformDispatcher.instance is the only way to reach the phone's
+// language from here.
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:delivery_boy_app/services/api_config.dart';
 import 'package:flutter/widgets.dart';
@@ -47,22 +51,45 @@ String get _baseUrl => ApiConfig.baseUrl;
 // the UI's twenty seconds because these run on a 15-second tick.
 const Duration _requestTimeout = Duration(seconds: 12);
 
-// The foreground-service notification, cut down to the least Android will
-// accept. GPS that survives the app being backgrounded or force-killed has to
-// run in a foreground service, and Android has required every foreground
-// service to post a visible notification since Oreo — there is no flag that
-// removes it. What is left is making it say as little as possible: no body
-// text, and a channel (see MainActivity.kt) at IMPORTANCE_MIN so it is silent,
-// carries no status-bar icon, no badge and no lock-screen entry, and sits
-// collapsed at the bottom of the shade. On Android 13+ the driver can also
-// swipe it away and it stays gone for that run.
+// The foreground-service notification. Android has required every foreground
+// service to post one since Oreo, and this app now leans on that rather than
+// hiding from it: the notification is the only thing that tells a driver in the
+// field whether their location is still reaching the dispatcher.
+//
+// An earlier build ran the channel at IMPORTANCE_MIN with VISIBILITY_SECRET so
+// it carried no status-bar icon and no lock-screen entry. That made the failure
+// this whole change is about undiagnosable — on a phone whose vendor had
+// stopped the service, the notification the driver never saw simply stopped
+// being there, and the first anyone knew was a customer ringing to ask where
+// their order was. It is now IMPORTANCE_LOW (see MainActivity.kt): still
+// silent, no sound, no vibration, no badge, but visible, and its text is
+// rewritten every tick with the time of the last successful fix or a warning.
 //
 // The channel id is versioned because a channel's importance is fixed at
-// creation: existing installs already have 'driver_location_channel', and
-// re-creating it with a lower importance is a no-op. A new id is the only way
-// to get the quieter settings onto phones the old build already touched.
-const _notificationChannelId = 'driver_location_channel_v2';
+// creation, so raising it on a phone that already ran an older build is a no-op
+// unless the id changes. Must match LOCATION_CHANNEL_ID in MainActivity.kt.
+const _notificationChannelId = 'driver_location_channel_v3';
 const _notificationTitle = 'Driver App';
+
+// Consecutive ticks that failed to report a position, shared with the UI
+// isolate so the home screen can put the tracking setup screen in front of a
+// driver whose location has actually stopped flowing. Must match
+// kPingFailureStreakKey in tracking_permissions.dart.
+const _failureStreakKey = 'bg_ping_failure_streak';
+
+// Chosen language, written by LocaleProvider. Read here so the notification —
+// the one piece of UI this isolate owns — is not stuck in English for a driver
+// using the app in Arabic.
+const _localeKey = 'driver_locale';
+
+// A GPS read with no deadline can hang for as long as the radio wants, and this
+// one used to have none: a single stalled fix took the tick with it and the
+// timer's next run found nothing wrong, so the app went quiet without any error
+// to notice. Ten seconds leaves room for the next tick to try again, and a
+// stalled read falls back to the last known fix rather than reporting nothing —
+// a slightly old position still tells the dispatcher which street the driver is
+// on, which is more than a blank map does.
+const Duration _gpsTimeout = Duration(seconds: 10);
 
 // Reads the active order ids, migrating the legacy single-id key if present.
 // Shared by the UI isolate and the background isolate — both need the same
@@ -117,11 +144,15 @@ class BackgroundLocationService {
       androidConfiguration: AndroidConfiguration(
         onStart: _onStart,
         autoStart: false,
-        // The plugin restarts the service after a reboot or an app update by
-        // default, which would put a driver back on the dashboard without the
-        // app ever being opened. Location sharing here is meant to last no
-        // longer than the app the driver chose to open.
-        autoStartOnBoot: false,
+        // Comes back after a reboot or an app update. Previously false, on the
+        // reasoning that location sharing should last no longer than the app
+        // the driver chose to open — but the service is also what the phone's
+        // power manager kills, and a driver mid-shift whose phone restarted had
+        // no way of knowing they had gone dark. Nothing is reported without a
+        // token: the first tick after an unattended start finds no login and
+        // stops the service, so this only ever resumes a driver who was already
+        // signed in and working.
+        autoStartOnBoot: true,
         isForegroundMode: true,
         notificationChannelId: _notificationChannelId,
         initialNotificationTitle: _notificationTitle,
@@ -144,11 +175,12 @@ class BackgroundLocationService {
   /// The per-order pings that feed a customer's tracking page are not started
   /// here at all — only "Start Delivery" does that.
   ///
-  /// It is deliberately tied to the app's life, not the driver's shift. The
-  /// service is declared android:stopWithTask="true" and does not start on
-  /// boot, so swiping the app away from recents ends it, and with it every
-  /// order's location stream — a driver who has closed the app is a driver the
-  /// dashboard stops following. Opening the app again picks everything back up.
+  /// It is tied to the driver's shift, not the app's window. The service is
+  /// declared android:stopWithTask="false" and starts on boot, so it survives
+  /// the app being backgrounded, swiped away, or killed by the phone's power
+  /// manager — the last of which is what used to make Infinix and Tecno drivers
+  /// drop off the dispatcher's map a few minutes after switching to Maps.
+  /// Logging out is what ends it: the next tick finds no token and stops.
   ///
   /// Safe to call on every app start and resume; it does nothing if the
   /// service is already running.
@@ -190,8 +222,8 @@ class BackgroundLocationService {
   ///
   /// This no longer stops the service when the last order finishes. The
   /// service outlives any one delivery: finishing everything on the list means
-  /// it goes quiet and stops touching the GPS, but it stays listening for the
-  /// next order the dispatcher sends. Closing the app is what ends it.
+  /// it stops posting to customer tracking pages, but it stays running for the
+  /// next order the dispatcher sends. Logging out is what ends it.
   ///
   /// Striking the order off this phone's started list is enough to stop its
   /// pings immediately, since that list is the only thing that starts them.
@@ -255,7 +287,7 @@ void _onStart(ServiceInstance service) async {
   if (service is AndroidServiceInstance) {
     service.setForegroundNotificationInfo(
       title: _notificationTitle,
-      content: '',
+      content: _startingText(await _isArabic()),
     );
   }
 
@@ -273,10 +305,11 @@ void _onStart(ServiceInstance service) async {
     await prefs.reload(); // pick up ids written by the UI isolate
     final token = prefs.getString(_tokenKey);
 
-    // Logging out ends it. Having nothing to deliver does not: the driver's
-    // own position still goes to the dispatcher's map for as long as the app
-    // is open. Closing the app ends it too, but that is Android's doing via
-    // stopWithTask, not this check.
+    // Logging out ends it, and is now the only thing that does. The service no
+    // longer dies with the app's task (see AndroidManifest.xml) because that
+    // could not tell a driver swiping the app away from a vendor power manager
+    // clearing it — so it keeps running until the driver says otherwise, with
+    // the notification visible the whole time.
     if (token == null) {
       service.stopSelf();
       return;
@@ -286,13 +319,27 @@ void _onStart(ServiceInstance service) async {
     tick++;
 
     final orderIds = await _resolveTrackedOrderIds(prefs);
+    final arabic = await _isArabic(prefs);
+
+    // The tick's verdict is recorded exactly once. Without this, a per-order
+    // POST timing out after the driver-level one had already succeeded would
+    // fall into the catch below and count as a failure — three slow orders in a
+    // row would then warn a driver whose location was in fact arriving fine.
+    var recorded = false;
+
+    Future<void> record({required bool reported}) async {
+      if (recorded) return;
+      recorded = true;
+      await _recordTick(service, prefs, arabic: arabic, reported: reported);
+    }
 
     try {
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
+      final position = await _readPosition();
+
+      if (position == null) {
+        await record(reported: false);
+        return;
+      }
 
       // One GPS read, reported to two different audiences.
       //
@@ -301,7 +348,13 @@ void _onStart(ServiceInstance service) async {
       // with nothing assigned is precisely who they are looking for when the
       // next order lands. This is why the fix is read even when the order list
       // below is empty.
-      await _postDriverLocation(token, position);
+      final reported = await _postDriverLocation(token, position);
+
+      // Whether the tick counts as a success is decided on the driver-level
+      // post alone. It is the one request that happens on every tick, so it is
+      // the only one that can tell "this phone has stopped reporting" from
+      // "this driver happens to have no orders on".
+      await record(reported: reported);
 
       // The customer gets it only through the orders actually under way —
       // unchanged, and deliberately so. A tracking page must never show a
@@ -318,10 +371,7 @@ void _onStart(ServiceInstance service) async {
               'Authorization': 'Bearer $token',
               'Content-Type': 'application/json',
             },
-            body: jsonEncode({
-              'latitude': position.latitude,
-              'longitude': position.longitude,
-            }),
+            body: jsonEncode(_locationBody(position)),
           ).timeout(_requestTimeout),
         ),
       );
@@ -348,29 +398,135 @@ void _onStart(ServiceInstance service) async {
         );
       }
     } catch (_) {
-      // Silent — a missed ping is acceptable
+      // A missed ping is survivable; a run of them is not, and this used to be
+      // where that distinction was lost. The tick is still swallowed rather
+      // than crashing the service, but it is counted first — unless the
+      // driver-level post already reported for this tick, in which case the
+      // failure was somewhere further down and the phone is clearly still able
+      // to reach the server.
+      await record(reported: false);
     }
   });
 }
 
-// Reports where the driver is to the dispatcher's live map, with no order
-// attached. Best-effort: a failed post costs one dot on a dashboard, and must
-// never take down the per-order pings that a waiting customer is watching.
-Future<void> _postDriverLocation(String token, Position position) async {
+/// One GPS fix, or null if the phone could not produce one.
+///
+/// Falls back to the last known position when the radio does not answer inside
+/// [_gpsTimeout]. That fix may be a minute old, but the alternative is the
+/// driver disappearing from the dispatcher's map entirely, and a stale dot is
+/// far more useful to whoever is looking at it than no dot.
+Future<Position?> _readPosition() async {
   try {
-    await http.post(
+    return await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        timeLimit: _gpsTimeout,
+      ),
+    );
+  } catch (_) {
+    try {
+      return await Geolocator.getLastKnownPosition();
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+/// The POST body for both location endpoints.
+///
+/// `sent_at` is the phone's own clock at the moment of the fix. The server
+/// timestamps rows on arrival, which cannot tell a ping delayed by a bad signal
+/// from one delayed by the phone having been asleep — the difference between
+/// "the network is slow here" and "this device stopped reporting", which is
+/// exactly the failure being chased. Extra fields are ignored by the API.
+Map<String, dynamic> _locationBody(Position position) => {
+      'latitude': position.latitude,
+      'longitude': position.longitude,
+      'sent_at': DateTime.now().toUtc().toIso8601String(),
+    };
+
+/// Records the outcome of a tick and rewrites the notification to match.
+///
+/// The streak is what the home screen reads to decide whether to put the
+/// tracking setup screen back in front of the driver, and the notification text
+/// is what the driver themselves sees. Both exist for the same reason: on a
+/// phone whose vendor has throttled the app, everything looks fine right up
+/// until a customer calls to ask where their order is.
+Future<void> _recordTick(
+  ServiceInstance service,
+  SharedPreferences prefs, {
+  required bool arabic,
+  required bool reported,
+}) async {
+  final streak = reported ? 0 : (prefs.getInt(_failureStreakKey) ?? 0) + 1;
+  await prefs.setInt(_failureStreakKey, streak);
+
+  if (service is! AndroidServiceInstance) return;
+
+  await service.setForegroundNotificationInfo(
+    title: _notificationTitle,
+    content: reported
+        ? _activeText(arabic, DateTime.now())
+        : _stalledText(arabic, streak),
+  );
+}
+
+// The notification is the only text this isolate shows, and it has no access to
+// AppLocalizations — that lives in the UI isolate behind a BuildContext. Four
+// strings inline is cheaper than making the whole translation table reachable
+// from here, and they are the only ones that will ever be needed.
+String _startingText(bool arabic) =>
+    arabic ? 'جارٍ بدء التتبع…' : 'Starting location sharing…';
+
+String _activeText(bool arabic, DateTime at) {
+  final time = '${at.hour.toString().padLeft(2, '0')}:'
+      '${at.minute.toString().padLeft(2, '0')}';
+  return arabic ? 'التتبع يعمل · آخر تحديث $time' : 'Tracking on · last sent $time';
+}
+
+String _stalledText(bool arabic, int streak) {
+  // Two misses is 30 seconds, still inside what a tunnel explains. Past that,
+  // say so plainly — the driver is the only one who can go and fix it.
+  if (streak < 3) {
+    return arabic ? 'جارٍ إعادة المحاولة…' : 'Retrying…';
+  }
+  return arabic
+      ? '⚠ توقف التتبع — افتح التطبيق'
+      : '⚠ Location stopped — open the app';
+}
+
+/// Whether the driver picked Arabic, falling back to the phone's own language
+/// the same way MaterialApp does when no explicit choice has been stored.
+Future<bool> _isArabic([SharedPreferences? loaded]) async {
+  try {
+    final prefs = loaded ?? await SharedPreferences.getInstance();
+    final stored = prefs.getString(_localeKey);
+    if (stored != null) return stored == 'ar';
+    return PlatformDispatcher.instance.locale.languageCode == 'ar';
+  } catch (_) {
+    return false;
+  }
+}
+
+// Reports where the driver is to the dispatcher's live map, with no order
+// attached. Still best-effort — a failed post must never take down the
+// per-order pings a waiting customer is watching — but it now says whether it
+// worked, because a run of failures here is the app's own early warning that
+// this phone has stopped reporting.
+Future<bool> _postDriverLocation(String token, Position position) async {
+  try {
+    final response = await http.post(
       Uri.parse('$_baseUrl/api/drivers/me/location'),
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
       },
-      body: jsonEncode({
-        'latitude': position.latitude,
-        'longitude': position.longitude,
-      }),
+      body: jsonEncode(_locationBody(position)),
     ).timeout(_requestTimeout);
+
+    return response.statusCode >= 200 && response.statusCode < 300;
   } catch (_) {
-    // Silent — a missed dispatcher update is acceptable.
+    return false;
   }
 }
 

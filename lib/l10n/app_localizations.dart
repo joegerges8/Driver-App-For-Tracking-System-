@@ -198,6 +198,36 @@ class AppLocalizations {
           'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
         ];
 
+  // ── Tracking setup ────────────────────────────────────────────────────────
+  // The screen that walks the driver through the phone settings their location
+  // needs in order to keep reporting while the app is in the background.
+  String get trackingSetupTitle => _t('trackingSetupTitle');
+  String get trackingSetupIntro => _t('trackingSetupIntro');
+  String get trackingBannerFix => _t('trackingBannerFix');
+  String get trackingBannerIncomplete => _t('trackingBannerIncomplete');
+  String get trackingBannerStopped => _t('trackingBannerStopped');
+  String get trackingStepLocationTitle => _t('trackingStepLocationTitle');
+  String get trackingStepLocationBody => _t('trackingStepLocationBody');
+  String get trackingStepBatteryTitle => _t('trackingStepBatteryTitle');
+  String get trackingStepBatteryBody => _t('trackingStepBatteryBody');
+  String get trackingStepAutostartTitle => _t('trackingStepAutostartTitle');
+  String get trackingStepRecentsTitle => _t('trackingStepRecentsTitle');
+  String get trackingStepRecentsBody => _t('trackingStepRecentsBody');
+  String get trackingStepGpsTitle => _t('trackingStepGpsTitle');
+  String get trackingStepGpsBody => _t('trackingStepGpsBody');
+  String get trackingOpenSettings => _t('trackingOpenSettings');
+  String get trackingGrant => _t('trackingGrant');
+  String get trackingDone => _t('trackingDone');
+  String get trackingAllSet => _t('trackingAllSet');
+  String get trackingRecheck => _t('trackingRecheck');
+  String get trackingFinish => _t('trackingFinish');
+
+  /// The autostart step's wording, which is the one that differs per phone —
+  /// Transsion's "Power Marathon" on Infinix and Tecno is a different screen
+  /// with a different name from MIUI's autostart list.
+  String trackingStepAutostartBody(String? vendorKey) =>
+      _t('trackingAutostart_${vendorKey ?? 'generic'}');
+
   // ── Toasts ────────────────────────────────────────────────────────────────
   String get toastSuccess => _t('toastSuccess');
   String get toastFail => _t('toastFail');
@@ -323,6 +353,61 @@ class AppLocalizations {
     'today': 'Today',
     'yesterday': 'Yesterday',
 
+    'trackingSetupTitle': 'Keep tracking alive',
+    'trackingSetupIntro':
+        'Your phone can stop the app from sharing your location while you are '
+        'using Maps or talking to a customer. These settings stop that from '
+        'happening. You only need to do this once.',
+    'trackingBannerFix': 'Fix',
+    'trackingBannerIncomplete':
+        'Your location may stop when you leave the app.',
+    'trackingBannerStopped':
+        'Your location stopped reaching the office. Check your settings.',
+    'trackingStepLocationTitle': 'Allow location all the time',
+    'trackingStepLocationBody':
+        'Choose "Allow all the time", not "Only while using the app". Without '
+        'it your location stops the moment you open another app.',
+    'trackingStepBatteryTitle': 'Turn off battery optimisation',
+    'trackingStepBatteryBody':
+        'Set this app to Unrestricted so the phone does not put it to sleep '
+        'while you are driving.',
+    'trackingStepAutostartTitle': 'Allow background running',
+    'trackingStepRecentsTitle': 'Lock the app in recents',
+    'trackingStepRecentsBody':
+        'Open your recent apps, then hold this app and tap the padlock. A '
+        'locked app is not closed when the phone clears memory.',
+    'trackingStepGpsTitle': 'Turn on GPS',
+    'trackingStepGpsBody':
+        'Location is switched off on this phone. Turn it on to start sharing '
+        'your position.',
+    'trackingOpenSettings': 'Open settings',
+    'trackingGrant': 'Allow',
+    'trackingDone': 'Done',
+    'trackingAllSet': 'All set — your location will keep working.',
+    'trackingRecheck': 'Check again',
+    'trackingFinish': 'Finish',
+
+    // Per-vendor wording for the background-running step. Transsion first: it
+    // is the one Infinix and Tecno drivers need.
+    'trackingAutostart_transsion':
+        'Tap below, then turn this app ON in the auto-start list. Also open '
+        'Phone Manager and remove this app from Power Marathon or the app '
+        'freezer, so it is not closed in the background.',
+    'trackingAutostart_xiaomi':
+        'Tap below and turn Autostart ON for this app. Then, under Battery '
+        'saver, set it to No restrictions.',
+    'trackingAutostart_oppo':
+        'Tap below and allow this app to start in the background, then set '
+        'its battery usage to Allow background running.',
+    'trackingAutostart_vivo':
+        'Tap below and allow this app to start in the background, then allow '
+        'high background power use.',
+    'trackingAutostart_huawei':
+        'Tap below, then set this app to Manage manually and turn on '
+        'Auto-launch, Secondary launch and Run in background.',
+    'trackingAutostart_generic':
+        'Tap below and allow this app to run in the background.',
+
     'toastSuccess': 'Successful',
     'toastFail': 'Fail',
   };
@@ -447,6 +532,54 @@ class AppLocalizations {
     'periodMonth': 'شهر',
     'today': 'اليوم',
     'yesterday': 'أمس',
+
+    'trackingSetupTitle': 'حافظ على عمل التتبع',
+    'trackingSetupIntro':
+        'قد يوقف هاتفك مشاركة موقعك أثناء استخدامك للخرائط أو حديثك مع الزبون. '
+        'هذه الإعدادات تمنع ذلك. تحتاج إلى ضبطها مرة واحدة فقط.',
+    'trackingBannerFix': 'إصلاح',
+    'trackingBannerIncomplete': 'قد يتوقف موقعك عند خروجك من التطبيق.',
+    'trackingBannerStopped': 'توقف وصول موقعك إلى المكتب. راجع الإعدادات.',
+    'trackingStepLocationTitle': 'السماح بالموقع طوال الوقت',
+    'trackingStepLocationBody':
+        'اختر «السماح طوال الوقت» وليس «أثناء استخدام التطبيق فقط». بدون ذلك '
+        'يتوقف موقعك فور فتحك تطبيقًا آخر.',
+    'trackingStepBatteryTitle': 'إيقاف تحسين البطارية',
+    'trackingStepBatteryBody':
+        'اضبط هذا التطبيق على «غير مقيّد» حتى لا يوقفه الهاتف أثناء القيادة.',
+    'trackingStepAutostartTitle': 'السماح بالعمل في الخلفية',
+    'trackingStepRecentsTitle': 'ثبّت التطبيق في التطبيقات الأخيرة',
+    'trackingStepRecentsBody':
+        'افتح التطبيقات الأخيرة، ثم اضغط مطوّلًا على هذا التطبيق واضغط على '
+        'القفل. التطبيق المقفل لا يُغلق عند تفريغ ذاكرة الهاتف.',
+    'trackingStepGpsTitle': 'تشغيل GPS',
+    'trackingStepGpsBody':
+        'خدمة الموقع مغلقة على هذا الهاتف. شغّلها لبدء مشاركة موقعك.',
+    'trackingOpenSettings': 'فتح الإعدادات',
+    'trackingGrant': 'السماح',
+    'trackingDone': 'تم',
+    'trackingAllSet': 'كل شيء جاهز — سيستمر عمل موقعك.',
+    'trackingRecheck': 'تحقق مرة أخرى',
+    'trackingFinish': 'إنهاء',
+
+    'trackingAutostart_transsion':
+        'اضغط بالأسفل، ثم فعّل هذا التطبيق في قائمة التشغيل التلقائي. وافتح '
+        'أيضًا مدير الهاتف واستثنِ التطبيق من Power Marathon أو مجمّد '
+        'التطبيقات حتى لا يُغلق في الخلفية.',
+    'trackingAutostart_xiaomi':
+        'اضغط بالأسفل وفعّل «التشغيل التلقائي» لهذا التطبيق، ثم اضبط موفّر '
+        'البطارية على «بلا قيود».',
+    'trackingAutostart_oppo':
+        'اضغط بالأسفل واسمح لهذا التطبيق بالعمل في الخلفية، ثم اضبط استهلاك '
+        'البطارية على السماح بالعمل في الخلفية.',
+    'trackingAutostart_vivo':
+        'اضغط بالأسفل واسمح لهذا التطبيق بالعمل في الخلفية، ثم اسمح باستهلاك '
+        'طاقة مرتفع في الخلفية.',
+    'trackingAutostart_huawei':
+        'اضغط بالأسفل، ثم اضبط التطبيق على «إدارة يدوية» وفعّل التشغيل '
+        'التلقائي والتشغيل الثانوي والعمل في الخلفية.',
+    'trackingAutostart_generic':
+        'اضغط بالأسفل واسمح لهذا التطبيق بالعمل في الخلفية.',
 
     'toastSuccess': 'تم بنجاح',
     'toastFail': 'فشل',

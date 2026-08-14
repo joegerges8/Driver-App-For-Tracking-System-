@@ -8,6 +8,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Keeps the CPU awake long enough for the 15-second GPS read and POST to
+         finish while the screen is off. Without it Doze can suspend the isolate
+         mid-tick, which looks exactly like the driver having stopped moving. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- Lets the service come back after a reboot, so a phone that restarts
+         mid-shift does not silently stop reporting until someone notices. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- Needed to show the "stop optimising this app" dialog. Requested only
+         from the tracking setup screen, never silently: continuous background
+         location is this app's core function, and Doze is the single biggest
+         cause of a driver dropping off the dispatcher's map. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <application android:label="Driver App" android:name="${applicationName}" android:icon="@mipmap/ic_launcher">
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:taskAffinity="" android:theme="@style/LaunchTheme" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode" android:hardwareAccelerated="true" android:windowSoftInputMode="adjustResize">
             <!-- Specifies an Android theme to apply to this Activity as soon as
@@ -25,19 +37,28 @@
         <meta-data android:name="flutterEmbedding" android:value="2" />
         <!-- for google map -->
         <meta-data android:name="com.google.android.geo.API_KEY" android:value="AIzaSyAriVJnIv8YZpcpQOIUy-4f3Tb1i0RTfAg"/>
-        <!-- flutter_background_service: posts GPS while the app is running.
-             stopWithTask="true" overrides the plugin's own "false" so that
-             swiping the app away from recents ends the service with it — a
-             driver who has closed the app stops being followed on the
-             dispatcher's map, which is the whole point. Location sharing is
-             deliberately no longer-lived than the app itself: it survives the
-             app being backgrounded (the driver switching to Maps to navigate
-             is still mid-delivery) and nothing beyond that. -->
+        <!-- flutter_background_service: posts GPS while the driver is on shift.
+             stopWithTask="false" (the plugin's own default) is deliberate and
+             was previously overridden to "true".
+
+             The intent behind "true" was that a driver who closes the app stops
+             being followed. In practice it could not tell the difference
+             between the driver swiping the app away and the phone's own power
+             manager clearing the task — and on Infinix/Tecno (Transsion
+             HiOS/XOS) the latter happens within minutes of the app being
+             backgrounded, so a driver who merely opened Google Maps or answered
+             a call vanished from the dispatcher's map mid-delivery.
+
+             What ends location sharing now is the driver's own decision rather
+             than a guess about one: logging out clears the token and the service
+             stops itself on its next tick (see background_location_service.dart).
+             The foreground-service notification stays visible the whole time it
+             is running, so tracking is never on without the driver seeing it. -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
             android:foregroundServiceType="location"
             android:exported="false"
-            android:stopWithTask="true"
+            android:stopWithTask="false"
             tools:replace="android:exported,android:stopWithTask" />
     </application>
     <!-- Required to query activities that can process text, see:
@@ -59,5 +80,18 @@
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="google.navigation"/>
         </intent>
+        <!-- Vendor power-manager apps, so the tracking setup screen can send the
+             driver straight to the autostart list instead of describing where to
+             find it. Android 11+ hides other packages unless they are declared
+             here, which would make getLaunchIntentForPackage return null.
+             Transsion (Infinix/Tecno/itel) first — it is the one that matters. -->
+        <package android:name="com.transsion.phonemanager"/>
+        <package android:name="com.cyin.himgr"/>
+        <package android:name="com.miui.securitycenter"/>
+        <package android:name="com.coloros.safecenter"/>
+        <package android:name="com.oppo.safe"/>
+        <package android:name="com.iqoo.secure"/>
+        <package android:name="com.vivo.permissionmanager"/>
+        <package android:name="com.huawei.systemmanager"/>
     </queries>
 </manifest>
