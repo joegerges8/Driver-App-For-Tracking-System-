@@ -22,6 +22,14 @@
 // rather than held in a single field: with one shared status, starting a second
 // delivery silently ended the first, and its customer's map froze mid-journey.
 //
+// Step 3 is written down before it is sent. The outcome goes into a queue on
+// disk (see pending_status_queue.dart) and is retried — on every poll, on every
+// app start, and from the background service while the app is closed — until
+// the backend confirms it. A driver who marks an order delivered with no
+// signal used to lose it entirely: the order read as done on the phone and
+// stayed out for delivery on the dispatcher's dashboard, with nothing left
+// anywhere that would ever try again.
+//
 // There is no in-app map, no accept/decline step and no "picked up" step.
 // PICKED_UP is set by the dispatcher from the dashboard — that status is what
 // makes the driver's marker appear on the customer's tracking page, while the
@@ -38,6 +46,7 @@ import 'dart:async';
 import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/services/api_client.dart';
 import 'package:delivery_boy_app/services/background_location_service.dart';
+import 'package:delivery_boy_app/services/pending_status_queue.dart';
 import 'package:delivery_boy_app/utils/delivery_day.dart';
 import 'package:delivery_boy_app/utils/order_sort.dart';
 import 'package:flutter/material.dart';
@@ -81,6 +90,22 @@ class DeliveryProvider extends ChangeNotifier {
   // by the backend yet. Only these survive a completed-orders fetch that comes
   // back without them — anything else the backend omits is genuinely gone.
   final Set<String> _unsyncedCompletedIds = {};
+
+  // ── The outbox ────────────────────────────────────────────────────────────
+  // Delivery outcomes written to disk and not yet accepted by the backend.
+  //
+  // A driver marking an order delivered with no signal used to lose it: the
+  // PATCH failed, the order sat in the Done tab looking finished, and the
+  // dashboard still showed it out for delivery with nothing left to try again.
+  // The queue is the record that survives that — the app retries it on every
+  // poll, on every relaunch, and from the background service while the app is
+  // closed, until the backend confirms.
+  //
+  // This mirror of the stored queue is what the UI reads; PendingStatusQueue
+  // holds the copy that outlives the process.
+  List<PendingStatusChange> _pendingStatuses = const [];
+  bool _loadedPendingStatuses = false;
+  bool _isFlushingStatuses = false;
 
   // True once the Done tab has loaded at least once, so the background poll
   // knows whether keeping that list fresh is worth a request.
@@ -201,6 +226,20 @@ class DeliveryProvider extends ChangeNotifier {
   bool get isLoadingReturned => _isLoadingReturned;
   String? get returnedError => _returnedError;
 
+  /// How many finished deliveries are still waiting to reach the backend.
+  ///
+  /// Zero is the normal state — a delivery marked with signal syncs in the same
+  /// second. Anything above zero means the dashboard does not know about that
+  /// many completed orders yet, which is worth telling the driver so they are
+  /// not surprised by a dispatcher asking about an order they finished hours
+  /// ago.
+  int get pendingSyncCount => _pendingStatuses.length;
+
+  /// Whether this particular order is finished on the phone but not yet on the
+  /// dashboard. Used by the order card to mark it as still syncing.
+  bool hasPendingSync(String? orderId) =>
+      orderId != null && _pendingStatuses.any((c) => c.orderId == orderId);
+
   // Creates a copy of an order with updated pickup location fields.
   // OrderModel is immutable (all fields are final), so we must create a new
   // instance rather than mutating the existing one.
@@ -229,8 +268,12 @@ class DeliveryProvider extends ChangeNotifier {
   // until the PATCH lands this copy is all the app has, and an order with no
   // completion time belongs to no day at all — the driver would tap "Mark as
   // Delivered" and watch the order leave the Done tab it had just entered.
-  OrderModel _withDeliveryRecorded(OrderModel order) {
-    return order.copyWith(isPaid: true, deliveredAt: DateTime.now());
+  //
+  // [at] is when the delivery actually happened, for the case where that is
+  // not now: an order finished offline and read back out of the outbox after a
+  // restart keeps the time the driver marked it, not the time the app reopened.
+  OrderModel _withDeliveryRecorded(OrderModel order, {DateTime? at}) {
+    return order.copyWith(isPaid: true, deliveredAt: at ?? DateTime.now());
   }
 
   // Fetches the list of assigned (non-delivered) orders for this driver
@@ -245,6 +288,9 @@ class DeliveryProvider extends ChangeNotifier {
     bool silent = false,
   }) async {
     await _restoreActiveDeliveries();
+    // Deliveries finished offline before the app was last closed. Read before
+    // the list is fetched so the answer can be judged against them.
+    await loadPendingStatuses();
 
     // Snapshot every in-progress delivery, not just the one on screen. Orders
     // the driver is carrying must survive a refresh even if the backend list
@@ -275,7 +321,14 @@ class DeliveryProvider extends ChangeNotifier {
       // a race condition where the PATCH request to mark an order DELIVERED or
       // RETURNED hasn't reached the server yet by the time refreshMyOrders runs,
       // causing the order to reappear in the list from the backend response.
+      //
+      // Orders whose outcome is still sitting in the outbox are moved into
+      // their tab here first, then counted as finished with the rest. Without
+      // that, an order the driver delivered in a dead spot — which the backend
+      // still lists as assigned, because it has not been told — would come
+      // back into the pending list on the next refresh and read as undelivered.
       final finishedIds = {
+        ..._applyPendingStatuses(parsed),
         ..._completedOrders.map((o) => o.id),
         ..._returnedOrders.map((o) => o.id),
       };
@@ -643,6 +696,11 @@ class DeliveryProvider extends ChangeNotifier {
 
     _isPolling = true;
     try {
+      // Before anything is read, whatever the app still owes the backend is
+      // sent. This is the retry that closes the loop: a delivery marked with no
+      // signal reaches the dashboard on the first poll after the connection
+      // comes back, without the driver doing anything.
+      await flushPendingStatuses(token: token);
       await refreshMyOrders(token: token, silent: true);
       // Only worth a request once the driver has actually opened the Done tab.
       if (_completedLoadedOnce) {
@@ -747,6 +805,14 @@ class DeliveryProvider extends ChangeNotifier {
 
     _statusById[order.id] = DeliveryStatus.delivering;
 
+    // Taking the order back out cancels any outcome still queued for it. The
+    // backend was never told that this order was delivered or returned — that
+    // is what "queued" means — so it already holds the order as open, which is
+    // exactly where the driver is putting it. Sending the old outcome later
+    // would close an order that is on the road.
+    final supersededQueue = _pendingFor(order.id);
+    if (supersededQueue != null) await _clearPending(order.id);
+
     if (order.id.isNotEmpty) {
       BackgroundLocationService.startTracking(order.id);
     }
@@ -778,7 +844,7 @@ class DeliveryProvider extends ChangeNotifier {
       // drop the order out of every tab. Put it back where the driver found
       // it and let the caller say why.
       _reopeningIds.remove(order.id);
-      _undoRestart(order, previousStatus);
+      await _undoRestart(order, previousStatus, requeue: supersededQueue);
       rethrow;
     }
 
@@ -788,9 +854,36 @@ class DeliveryProvider extends ChangeNotifier {
     await ApiClient.startOrderDelivery(token: token, orderId: order.id);
   }
 
+  /// The queued outcome for an order, or null if it has none outstanding.
+  PendingStatusChange? _pendingFor(String orderId) {
+    for (final change in _pendingStatuses) {
+      if (change.orderId == orderId) return change;
+    }
+    return null;
+  }
+
   // Puts a finished order that failed to re-open back where the driver found
   // it, exactly as it was before they tapped "Start Delivery".
-  void _undoRestart(OrderModel order, DeliveryStatus previousStatus) {
+  //
+  // [requeue] is the outcome that was cancelled when the restart began. If the
+  // restart itself never landed, that cancellation must be undone too —
+  // otherwise a driver who tapped "Start Delivery" on a delivered order while
+  // offline would end up with the order back in the Done tab and nothing left
+  // anywhere to tell the backend it was ever delivered.
+  Future<void> _undoRestart(
+    OrderModel order,
+    DeliveryStatus previousStatus, {
+    PendingStatusChange? requeue,
+  }) async {
+    if (requeue != null) {
+      _pendingStatuses = await PendingStatusQueue.enqueue(requeue);
+      if (requeue.isDelivered) {
+        _unsyncedCompletedIds.add(order.id);
+      } else {
+        _unsyncedReturnedIds.add(order.id);
+      }
+    }
+
     _statusById[order.id] = previousStatus;
     _pickupLocationById.remove(order.id);
     _pickupAddressById.remove(order.id);
@@ -812,24 +905,21 @@ class DeliveryProvider extends ChangeNotifier {
   }
 
   // Updates UI immediately, then syncs DELIVERED to the backend.
-  // Throws if the network call fails so the caller can show an error to the driver.
-  Future<void> markDelivered({required String token}) async {
+  //
+  // Returns true when the backend has confirmed it, false when it could not be
+  // reached and the delivery has been queued to send later. Throws only when
+  // the backend actively refused the change — an order that is no longer this
+  // driver's — because that is the one case where trying again cannot help and
+  // the driver needs to be told now.
+  Future<bool> markDelivered({required String token}) async {
     final orderId = _currentOrder?.id;
     completeDelivery(); // instant UI update — removes from pending, adds to completed
-    if (orderId == null || orderId.isEmpty) return;
-    // Marked until the backend confirms: this is what protects the order from
-    // being dropped by a completed-orders fetch that raced the PATCH.
-    _unsyncedCompletedIds.add(orderId);
-    try {
-      await ApiClient.updateOrderStatus(
-        token: token,
-        orderId: orderId,
-        status: 'DELIVERED',
-      );
-      _unsyncedCompletedIds.remove(orderId);
-    } catch (e) {
-      rethrow; // caller shows error snackbar; the id stays marked unsynced
-    }
+    if (orderId == null || orderId.isEmpty) return true;
+    return _recordStatusChange(
+      orderId: orderId,
+      status: 'DELIVERED',
+      token: token,
+    );
   }
 
   // Saves the driver's own note on the order that is open on the detail screen.
@@ -880,25 +970,216 @@ class DeliveryProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Updates UI immediately, then syncs RETURNED to the backend.
-  // Throws if the network call fails so the caller can show an error to the driver.
-  Future<void> markReturned({required String token}) async {
+  // Updates UI immediately, then syncs RETURNED to the backend, on exactly the
+  // same terms as markDelivered above: true if it landed, false if it is
+  // queued for when the connection is back, and it only throws if the backend
+  // refused it outright.
+  Future<bool> markReturned({required String token}) async {
     final orderId = _currentOrder?.id;
     completeReturn(); // instant UI update — moves the order to the Returned tab
-    if (orderId == null || orderId.isEmpty) return;
+    if (orderId == null || orderId.isEmpty) return true;
+    return _recordStatusChange(
+      orderId: orderId,
+      status: 'RETURNED',
+      token: token,
+    );
+  }
+
+  // ── Syncing finished deliveries ───────────────────────────────────────────
+
+  // Records a finished delivery and tries to send it.
+  //
+  // Written to disk before the request goes out, never after. That order
+  // matters more than anything else here: the app can be killed between the
+  // tap and the reply — a driver pockets the phone, the system reclaims the
+  // app — and whatever was only in memory at that moment is what used to be
+  // lost.
+  Future<bool> _recordStatusChange({
+    required String orderId,
+    required String status,
+    required String token,
+  }) async {
+    final change = PendingStatusChange(
+      orderId: orderId,
+      status: status,
+      occurredAt: DateTime.now(),
+    );
+
     // Marked until the backend confirms: this is what protects the order from
-    // being dropped by a returned-orders fetch that raced the PATCH.
-    _unsyncedReturnedIds.add(orderId);
+    // being dropped by a completed/returned fetch that raced the PATCH.
+    if (change.isDelivered) {
+      _unsyncedCompletedIds.add(orderId);
+    } else {
+      _unsyncedReturnedIds.add(orderId);
+    }
+
+    _pendingStatuses = await PendingStatusQueue.enqueue(change);
+    notifyListeners();
+
+    if (token.isEmpty) return false;
+
+    final outcome = await _sendStatusChange(change, token: token);
+    notifyListeners();
+    if (outcome.error != null) throw outcome.error!;
+    return outcome.sent;
+  }
+
+  // Sends one queued change and settles what happens to it.
+  //
+  // Accepted, or refused for a reason that will not change, and it leaves the
+  // queue. Anything else — no signal, a timeout, a backend having a bad
+  // minute — and it stays exactly where it is for the next attempt.
+  Future<_StatusSyncOutcome> _sendStatusChange(
+    PendingStatusChange change, {
+    required String token,
+  }) async {
     try {
       await ApiClient.updateOrderStatus(
         token: token,
-        orderId: orderId,
-        status: 'RETURNED',
+        orderId: change.orderId,
+        status: change.status,
+        occurredAt: change.occurredAt,
       );
-      _unsyncedReturnedIds.remove(orderId);
-    } catch (e) {
-      rethrow; // caller shows error snackbar; the id stays marked unsynced
+      await _clearPending(change.orderId);
+      return const _StatusSyncOutcome(sent: true);
+    } on ApiException catch (e) {
+      if (e.isRetryable) return const _StatusSyncOutcome(sent: false);
+
+      // The backend has considered it and said no — the order was deleted, or
+      // handed to another driver while this phone was offline. Keeping it in
+      // the queue would mean retrying it on every poll for the rest of time.
+      await _clearPending(change.orderId);
+      return _StatusSyncOutcome(sent: false, error: e);
+    } catch (_) {
+      // Anything unexpected is treated as worth trying again — the cost of a
+      // pointless retry is one request, the cost of dropping a delivery is the
+      // bug this whole queue exists to fix.
+      return const _StatusSyncOutcome(sent: false);
     }
+  }
+
+  Future<void> _clearPending(String orderId) async {
+    _pendingStatuses = await PendingStatusQueue.remove(orderId);
+    _unsyncedCompletedIds.remove(orderId);
+    _unsyncedReturnedIds.remove(orderId);
+  }
+
+  /// Reads the outbox back from disk, once per session.
+  ///
+  /// This is what carries a delivery across an app restart: the driver marks an
+  /// order delivered underground, the app is killed before signal returns, and
+  /// this is where the app finds out it still owes the backend an answer.
+  Future<void> loadPendingStatuses() async {
+    if (_loadedPendingStatuses) return;
+    _loadedPendingStatuses = true;
+
+    try {
+      _pendingStatuses = await PendingStatusQueue.load();
+      for (final change in _pendingStatuses) {
+        // Re-arm the same protection a fresh mark gets, so a fetch that comes
+        // back without these orders cannot quietly drop them from their tabs.
+        if (change.isDelivered) {
+          _unsyncedCompletedIds.add(change.orderId);
+        } else {
+          _unsyncedReturnedIds.add(change.orderId);
+        }
+        _statusById[change.orderId] = change.isDelivered
+            ? DeliveryStatus.delivered
+            : DeliveryStatus.returned;
+      }
+      if (_pendingStatuses.isNotEmpty) notifyListeners();
+    } catch (_) {
+      // A queue that cannot be read must not stop the app starting; the
+      // deliveries in it are retried on the next launch instead.
+    }
+  }
+
+  /// Tries to send everything still in the outbox.
+  ///
+  /// Called on every poll and on every app start. Stops at the first change
+  /// that could not be sent: they all go to the same backend, so if one cannot
+  /// reach it neither can the rest, and there is nothing to gain from working
+  /// through the whole queue timing out on each entry in turn.
+  Future<void> flushPendingStatuses({required String token}) async {
+    if (token.isEmpty || _isFlushingStatuses) return;
+    await loadPendingStatuses();
+
+    // Re-read from disk before deciding there is work to do. The background
+    // service flushes this same queue from its own isolate, so entries this
+    // mirror still lists may already have reached the backend — without this
+    // the app would keep telling the driver a delivery is waiting to sync long
+    // after it had synced.
+    final previousCount = _pendingStatuses.length;
+    _pendingStatuses = await PendingStatusQueue.load(refresh: true);
+    if (_pendingStatuses.length != previousCount) notifyListeners();
+
+    if (_pendingStatuses.isEmpty) return;
+
+    _isFlushingStatuses = true;
+    var sentAny = false;
+    try {
+      for (final change in List.of(_pendingStatuses)) {
+        final outcome = await _sendStatusChange(change, token: token);
+        if (outcome.sent) {
+          sentAny = true;
+          continue;
+        }
+        // Refused for good: that one is gone from the queue, and the rest are
+        // still worth attempting since the backend is plainly reachable.
+        if (outcome.error != null) {
+          sentAny = true;
+          continue;
+        }
+        break; // offline — leave the rest for the next round
+      }
+    } finally {
+      _isFlushingStatuses = false;
+      if (sentAny) notifyListeners();
+    }
+  }
+
+  // Applies the outbox to a freshly fetched order list.
+  //
+  // The backend answers with the world as it knows it, and it does not know
+  // about deliveries it has not been told about yet — so an order finished
+  // offline comes back still assigned. Left alone, it would reappear in the
+  // driver's pending list as if the delivery had never been marked, which is
+  // the same confusion from the other direction.
+  //
+  // Returns the ids it has taken over, for the caller to keep out of the
+  // pending list.
+  Set<String> _applyPendingStatuses(List<OrderModel> parsed) {
+    if (_pendingStatuses.isEmpty) return const <String>{};
+
+    final claimed = <String>{};
+    for (final change in _pendingStatuses) {
+      final index = parsed.indexWhere((o) => o.id == change.orderId);
+      if (index < 0) continue;
+
+      final order = parsed[index];
+      claimed.add(order.id);
+      _statusById[order.id] = change.isDelivered
+          ? DeliveryStatus.delivered
+          : DeliveryStatus.returned;
+
+      if (change.isDelivered) {
+        _returnedOrders =
+            _returnedOrders.where((o) => o.id != order.id).toList();
+        if (!_completedOrders.any((o) => o.id == order.id)) {
+          _completedOrders = [
+            _withDeliveryRecorded(order, at: change.occurredAt),
+            ..._completedOrders,
+          ];
+        }
+      } else {
+        _completedOrders =
+            _completedOrders.where((o) => o.id != order.id).toList();
+        if (!_returnedOrders.any((o) => o.id == order.id)) {
+          _returnedOrders = [order, ..._returnedOrders];
+        }
+      }
+    }
+    return claimed;
   }
 
   // Local state update for a finished delivery. Removes the order from the
@@ -975,4 +1256,17 @@ class DeliveryProvider extends ChangeNotifier {
     }
     notifyListeners();
   }
+}
+
+// What became of one attempt to send a queued outcome.
+//
+// Three results, not two: it landed, it could not be sent and is still queued,
+// or the backend refused it for good. The last one carries the exception so the
+// caller can decide whether the driver needs to see it — the driver who just
+// tapped the button does, a background retry does not.
+class _StatusSyncOutcome {
+  const _StatusSyncOutcome({required this.sent, this.error});
+
+  final bool sent;
+  final ApiException? error;
 }

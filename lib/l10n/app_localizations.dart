@@ -160,6 +160,9 @@ class AppLocalizations {
   String get orderMarkedReturned => _t('orderMarkedReturned');
   String get orderMarkedDelivered => _t('orderMarkedDelivered');
   String statusSyncFailed(String error) => '${_t('statusSyncFailed')}: $error';
+  String get statusQueuedOffline => _t('statusQueuedOffline');
+  String pendingSyncBanner(int count) =>
+      count == 1 ? _t('pendingSyncOne') : '$count ${_t('pendingSyncMany')}';
 
   // ── Home / map ────────────────────────────────────────────────────────────
   String get currentLocation => _t('currentLocation');
@@ -328,6 +331,10 @@ class AppLocalizations {
     'orderMarkedReturned': 'Order marked as returned',
     'orderMarkedDelivered': 'Order marked as delivered',
     'statusSyncFailed': 'Status sync failed',
+    'statusQueuedOffline':
+        'Saved on your phone — it will reach the dashboard when you are back online',
+    'pendingSyncOne': '1 finished order is waiting to sync',
+    'pendingSyncMany': 'finished orders are waiting to sync',
 
     'currentLocation': 'Current Location',
     'youAreHere': 'You are here!',
@@ -508,6 +515,10 @@ class AppLocalizations {
     'orderMarkedReturned': 'تم تحديد الطلب كمرتجع',
     'orderMarkedDelivered': 'تم تحديد الطلب كتم التوصيل',
     'statusSyncFailed': 'فشلت مزامنة الحالة',
+    'statusQueuedOffline':
+        'تم الحفظ على هاتفك — سيصل إلى لوحة التحكم عند عودة الاتصال',
+    'pendingSyncOne': 'طلب واحد منتهٍ بانتظار المزامنة',
+    'pendingSyncMany': 'طلبات منتهية بانتظار المزامنة',
 
     'currentLocation': 'الموقع الحالي',
     'youAreHere': 'أنت هنا!',

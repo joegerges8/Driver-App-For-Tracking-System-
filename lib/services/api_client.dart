@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:delivery_boy_app/services/api_config.dart';
+import 'package:delivery_boy_app/services/pending_status_queue.dart';
 import 'package:http/http.dart' as http;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
@@ -49,9 +50,12 @@ class ApiClient {
     try {
       return await request.timeout(_timeout);
     } on TimeoutException {
-      throw ApiException('Network timed out — check your connection');
+      throw ApiException(
+        'Network timed out — check your connection',
+        isNetworkFailure: true,
+      );
     } catch (e) {
-      throw ApiException('Network error: $e');
+      throw ApiException('Network error: $e', isNetworkFailure: true);
     }
   }
 
@@ -263,10 +267,19 @@ class ApiClient {
     }
   }
 
+  // Moves an order to a new status.
+  //
+  // [occurredAt] is when the driver actually made the call, and is only worth
+  // sending when that is not "now": a delivery marked in a dead spot reaches
+  // the backend whenever signal returns, and without the original time the
+  // dashboard would date it to the moment it synced. The backend ignores a
+  // timestamp in the future or implausibly far in the past and stamps its own
+  // clock instead, so a phone with the wrong date cannot rewrite history.
   static Future<void> updateOrderStatus({
     required String token,
     required String orderId,
     required String status,
+    DateTime? occurredAt,
   }) async {
     final res = await _send(http.patch(
       _uri('/api/drivers/me/orders/$orderId/status'),
@@ -274,7 +287,11 @@ class ApiClient {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
       },
-      body: jsonEncode({'status': status}),
+      body: jsonEncode({
+        'status': status,
+        if (occurredAt != null)
+          'occurred_at': occurredAt.toUtc().toIso8601String(),
+      }),
     ));
 
     if (res.statusCode >= 200 && res.statusCode < 300) return;
@@ -284,7 +301,10 @@ class ApiClient {
       final body = _decodeJson(res);
       message = _errorMessage(body);
     } catch (_) {}
-    throw ApiException(message ?? 'Failed to update order status (HTTP ${res.statusCode})');
+    throw ApiException(
+      message ?? 'Failed to update order status (HTTP ${res.statusCode})',
+      statusCode: res.statusCode,
+    );
   }
 
   // Saves the driver's own note on one of their orders. An empty note clears
@@ -432,8 +452,32 @@ class ApiClient {
 }
 
 class ApiException implements Exception {
+  ApiException(
+    this.message, {
+    this.statusCode,
+    this.isNetworkFailure = false,
+  });
+
   final String message;
-  ApiException(this.message);
+
+  /// HTTP status the backend answered with, or null when the request never
+  /// got an answer at all.
+  final int? statusCode;
+
+  /// True when the request never reached the backend — no signal, a dropped
+  /// connection, or a timeout.
+  final bool isNetworkFailure;
+
+  /// Whether sending exactly the same request later could still work: the
+  /// phone never reached the server, or the answer it got was one that could
+  /// come back differently. See isRetryableStatusCode for where that line sits
+  /// and why it is defined next to the queue rather than here.
+  bool get isRetryable {
+    if (isNetworkFailure) return true;
+    final code = statusCode;
+    if (code == null) return true;
+    return isRetryableStatusCode(code);
+  }
 
   @override
   String toString() => message;

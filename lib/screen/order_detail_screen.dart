@@ -527,7 +527,20 @@ class OrderDetailScreen extends StatelessWidget {
     if (navigator.canPop()) navigator.pop();
 
     try {
-      await update;
+      final synced = await update;
+      if (!synced) {
+        // Not an error — the outcome is saved on the phone and will be sent on
+        // its own once there is a connection. The driver is told so they know
+        // the dispatcher cannot see it yet, and so they do not go looking for
+        // the order on the dashboard and mark it a second time.
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(l10n.statusQueuedOffline),
+            backgroundColor: const Color(0xFF8D6E00),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(
