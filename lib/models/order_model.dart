@@ -220,8 +220,9 @@ class OrderModel {
     final shippingAddress = (json['shipping_address'] ?? '').toString().trim();
     final city = (json['city'] ?? '').toString().trim();
     final area = (json['area'] ?? '').toString().trim();
-    final country = (json['country'] ?? '').toString().trim();
-    final deliveryAddress = [shippingAddress, city, country]
+    // The country the backend stores is deliberately left out: every order is
+    // delivered inside Lebanon, so the word only ate room on the card.
+    final deliveryAddress = [shippingAddress, city]
         .where((p) => p.isNotEmpty)
         .join(', ');
 

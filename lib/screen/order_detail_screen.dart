@@ -277,17 +277,12 @@ class OrderDetailScreen extends StatelessWidget {
                                 ),
                               ),
                               SizedBox(height: 2),
+                              // The customer name used to repeat under the
+                              // address. The Customer Information card at the
+                              // top of this screen already carries it.
                               Text(
                                 order.deliveryAddress,
                                 style: TextStyle(fontSize: 13),
-                              ),
-                              SizedBox(height: 2),
-                              Text(
-                                order.customerName,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey,
-                                ),
                               ),
                             ],
                           ),
