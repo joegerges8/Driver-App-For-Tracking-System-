@@ -206,6 +206,80 @@ void main() {
     });
   });
 
+  group('framing the run', () {
+    test('boxes every point the driver has to see', () {
+      // Beirut, Jounieh and the driver somewhere between them: the box has to
+      // hold all three, with the lower corner south-west of the upper one.
+      final bounds = boundsFor(const [
+        LatLng(33.8938, 35.5018),
+        LatLng(33.9808, 35.6178),
+        LatLng(33.9450, 35.5600),
+      ])!;
+
+      expect(bounds.southwest, const LatLng(33.8938, 35.5018));
+      expect(bounds.northeast, const LatLng(33.9808, 35.6178));
+    });
+
+    test('puts the corners the right way round whatever the order in', () {
+      // The points arrive in whatever order the lists produced them; a box
+      // built with the corners swapped is rejected by Google Maps outright.
+      final bounds = boundsFor(const [
+        LatLng(34.4367, 35.8497),
+        LatLng(33.2705, 35.2038),
+      ])!;
+
+      expect(
+        bounds.southwest.latitude,
+        lessThanOrEqualTo(bounds.northeast.latitude),
+      );
+      expect(
+        bounds.southwest.longitude,
+        lessThanOrEqualTo(bounds.northeast.longitude),
+      );
+    });
+
+    test('has nothing to frame when there is nothing on the map', () {
+      expect(boundsFor(const []), isNull);
+    });
+
+    test('calls a driver standing among their orders one place', () {
+      // Everything inside one town. Fitting a camera to a box this small is a
+      // street-level zoom, which is what the framing exists to avoid.
+      final single = singlePointOf(const [
+        LatLng(33.9808, 35.6178),
+        LatLng(33.9814, 35.6183),
+      ]);
+
+      expect(single, isNotNull);
+      expect(single!.latitude, closeTo(33.9811, 0.001));
+    });
+
+    test('calls two towns apart a spread, not one place', () {
+      expect(
+        singlePointOf(const [
+          LatLng(33.8938, 35.5018), // Beirut
+          LatLng(33.9808, 35.6178), // Jounieh
+        ]),
+        isNull,
+      );
+    });
+
+    test('treats a lone driver with no orders as one place', () {
+      expect(singlePointOf(const [LatLng(33.9808, 35.6178)]), isNotNull);
+    });
+
+    test('holds the fanned-out pins of one town together as one place', () {
+      // Several orders in one town are spread on a ring a few dozen metres
+      // across. That must not read as a spread worth zooming out for.
+      final markers = buildOrderMarkers(
+        pending: [_order('1'), _order('2'), _order('3')],
+        delivered: const [],
+      );
+
+      expect(singlePointOf(markers.map((m) => m.position)), isNotNull);
+    });
+  });
+
   group('hasMappableLocation', () {
     test('rejects an order with no resolved town', () {
       expect(hasMappableLocation(_order('1', city: null)), isFalse);

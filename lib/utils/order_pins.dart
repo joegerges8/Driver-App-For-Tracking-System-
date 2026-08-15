@@ -130,6 +130,66 @@ Set<Marker> buildOrderMarkers({
   return markers;
 }
 
+/// The smallest box containing every one of [points], or null when there is
+/// nothing to contain.
+///
+/// This is what the home map opens on: the driver's own position together with
+/// every pin, so the first thing they see is the shape of the run rather than
+/// the street they are parked on. Google Maps takes the box and works out the
+/// zoom itself.
+///
+/// A single point gets a box with no area, which is a legitimate answer and a
+/// useless camera instruction — a zoom-to-fit on it goes to maximum zoom. The
+/// caller checks for that and asks for a plain zoom instead; see
+/// [singlePointOf].
+LatLngBounds? boundsFor(Iterable<LatLng> points) {
+  if (points.isEmpty) return null;
+
+  var minLatitude = points.first.latitude;
+  var maxLatitude = points.first.latitude;
+  var minLongitude = points.first.longitude;
+  var maxLongitude = points.first.longitude;
+
+  for (final point in points) {
+    if (point.latitude < minLatitude) minLatitude = point.latitude;
+    if (point.latitude > maxLatitude) maxLatitude = point.latitude;
+    if (point.longitude < minLongitude) minLongitude = point.longitude;
+    if (point.longitude > maxLongitude) maxLongitude = point.longitude;
+  }
+
+  // southwest must be the lower corner on both axes or Google Maps rejects the
+  // box outright.
+  return LatLngBounds(
+    southwest: LatLng(minLatitude, minLongitude),
+    northeast: LatLng(maxLatitude, maxLongitude),
+  );
+}
+
+/// The one place [points] describes, when they are all effectively the same
+/// place, or null when they genuinely spread out.
+///
+/// A driver standing in the town their only order is in produces a box a few
+/// dozen metres across, and fitting the camera to that is a street-level zoom
+/// — the thing this whole change is moving away from. Anything this tight is
+/// treated as one point and given a sensible zoom instead.
+///
+/// The threshold is about 300m at Lebanon's latitude, comfortably wider than
+/// the fan-out ring so several orders in one town still count as one place.
+LatLng? singlePointOf(Iterable<LatLng> points) {
+  final bounds = boundsFor(points);
+  if (bounds == null) return null;
+
+  const tolerance = 0.003;
+  final latitudeSpan = bounds.northeast.latitude - bounds.southwest.latitude;
+  final longitudeSpan = bounds.northeast.longitude - bounds.southwest.longitude;
+  if (latitudeSpan > tolerance || longitudeSpan > tolerance) return null;
+
+  return LatLng(
+    (bounds.southwest.latitude + bounds.northeast.latitude) / 2,
+    (bounds.southwest.longitude + bounds.northeast.longitude) / 2,
+  );
+}
+
 // Groups coordinates that are the same town centre. Rounded to five decimals —
 // about a metre — so two orders the backend placed identically always land in
 // one group, without floating-point equality being the thing holding it
