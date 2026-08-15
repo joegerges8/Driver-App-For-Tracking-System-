@@ -37,16 +37,27 @@ class OrderCard extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Text(
-                isOngoing ? l10n.ongoingOrder : l10n.newOrderAvailable,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
+              // Flexible so the header cannot overflow: on a narrow phone at a
+              // large accessibility font scale, "New Order Available" and the
+              // price together want more width than the card has, and a plain
+              // Row answers that with the striped overflow banner. The label is
+              // what gives way — the price is four characters and is the number
+              // the driver is looking for.
+              Flexible(
+                child: Text(
+                  isOngoing ? l10n.ongoingOrder : l10n.newOrderAvailable,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               const SizedBox(width: 15),
               Text(
                 "\$${order.price}",
+                maxLines: 1,
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,

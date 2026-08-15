@@ -87,6 +87,17 @@ class OrderModel {
   final String pickupAddress;
   final String deliveryAddress;
 
+  // The centre of the town this order is going to, sent by the backend as
+  // city_latitude / city_longitude. Null when the customer's city text matched
+  // no known town and the order carries no area either.
+  //
+  // This is not the doorstep and is not meant to be: it is the same town centre
+  // the ETA has always routed to, and it exists so the home map can show the
+  // shape of the run — how many orders, in which towns. deliveryLocation above
+  // stays the exact pin for the handful of orders that carry one; the two are
+  // kept apart so nothing can quietly navigate to a town centre.
+  final LatLng? cityLocation;
+
   // Tracks whether the customer has paid for this order.
   // For COD (Cash on Delivery) orders, this starts as false when the order
   // arrives from Shopify and becomes true only when the driver marks delivery
@@ -140,6 +151,7 @@ class OrderModel {
     required this.deliveryLocation,
     required this.pickupAddress,
     required this.deliveryAddress,
+    this.cityLocation,
     this.orderNumber = '',
     this.storeName = '',
     this.lineItems = const [],
@@ -179,6 +191,7 @@ class OrderModel {
       deliveryLocation: deliveryLocation,
       pickupAddress: pickupAddress ?? this.pickupAddress,
       deliveryAddress: deliveryAddress,
+      cityLocation: cityLocation,
       city: city,
       area: area,
       isPaid: isPaid ?? this.isPaid,
@@ -244,6 +257,14 @@ class OrderModel {
     // 3. Last resort: sentinel (0,0) — the map screen skips routing for this.
     deliveryLocation ??= const LatLng(0.0, 0.0);
 
+    // The town centre the backend resolved from the customer's city text. No
+    // sentinel here: an order the backend could not place is null and simply
+    // gets no pin, rather than a pin in the Gulf of Guinea.
+    final LatLng? cityLocation = _tryLatLng(
+      _asDouble(json['city_latitude']),
+      _asDouble(json['city_longitude']),
+    );
+
     // Pickup is always the driver's live location (set when the delivery starts).
     const pickupLocation = LatLng(0.0, 0.0);
 
@@ -285,6 +306,7 @@ class OrderModel {
       price: totalPrice == null ? 0 : totalPrice.round(),
       pickupLocation: pickupLocation,
       deliveryLocation: deliveryLocation,
+      cityLocation: cityLocation,
       pickupAddress: 'Current location',
       deliveryAddress:
           deliveryAddress.isNotEmpty ? deliveryAddress : 'Delivery address',
