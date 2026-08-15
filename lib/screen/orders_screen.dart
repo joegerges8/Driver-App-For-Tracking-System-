@@ -786,14 +786,16 @@ class _OrderListCard extends StatelessWidget {
                                 fontSize: 11,
                               ),
                             ),
+                            // Wraps over as many lines as it needs. A driver
+                            // reads the address to find the door, so an
+                            // ellipsis here hid the half that matters — the
+                            // building and the street.
                             Text(
                               order.deliveryAddress,
                               style: const TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
@@ -1055,82 +1057,105 @@ class _CompletedOrderCard extends StatelessWidget {
               ],
             ),
           ),
-          // Compact body row: delivery address, customer name/phone, price.
+          // Card body: the delivery address on a line of its own, then the
+          // customer name/phone and the price. The address used to share one
+          // row with those two, which left it a third of the card's width and
+          // an ellipsis over everything past the town — so it now gets the
+          // full width and wraps.
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(
-                  Icons.location_on_outlined,
-                  size: 15,
-                  color: Colors.black45,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    order.deliveryAddress,
-                    style: const TextStyle(fontSize: 13, color: Colors.black54),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                const Icon(
-                  Icons.person_outline,
-                  size: 15,
-                  color: Colors.black45,
-                ),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        order.customerName,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Padding(
+                      // Nudged down to sit on the address's first line rather
+                      // than on the cap height above it.
+                      padding: EdgeInsets.only(top: 2),
+                      child: Icon(
+                        Icons.location_on_outlined,
+                        size: 15,
+                        color: Colors.black45,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        order.deliveryAddress,
                         style: const TextStyle(
                           fontSize: 13,
                           color: Colors.black54,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      // Shown without its country code, as on the card above.
-                      if (displayPhone(order.customerPhone).isNotEmpty)
-                        Text(
-                          displayPhone(order.customerPhone),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.black38,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                // Mirrors the earnings strip: a prepaid order earned nothing,
-                // so it shows $0 with its own price kept as a caption.
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '\$${order.earnedPrice}',
-                      style: TextStyle(
-                        color: order.isPrepaid ? Colors.black38 : buttonMainColor,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
                       ),
                     ),
-                    if (order.isPrepaid)
-                      Text(
-                        '\$${order.price} ${context.l10n.prepaid.toLowerCase()}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Colors.black38,
-                        ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.person_outline,
+                      size: 15,
+                      color: Colors.black45,
+                    ),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            order.customerName,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: Colors.black54,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          // Shown without its country code, as on the card above.
+                          if (displayPhone(order.customerPhone).isNotEmpty)
+                            Text(
+                              displayPhone(order.customerPhone),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.black38,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                        ],
                       ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Mirrors the earnings strip: a prepaid order earned
+                    // nothing, so it shows $0 with its own price kept as a
+                    // caption.
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '\$${order.earnedPrice}',
+                          style: TextStyle(
+                            color: order.isPrepaid
+                                ? Colors.black38
+                                : buttonMainColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        if (order.isPrepaid)
+                          Text(
+                            '\$${order.price} ${context.l10n.prepaid.toLowerCase()}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.black38,
+                            ),
+                          ),
+                      ],
+                    ),
                   ],
                 ),
               ],
