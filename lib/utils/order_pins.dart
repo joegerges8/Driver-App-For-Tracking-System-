@@ -71,9 +71,13 @@ bool hasMappableLocation(OrderModel order) => order.cityLocation != null;
 ///
 /// [delivered] is taken as the more recent truth: an order in both lists is
 /// pinned green once and not red as well.
+///
+/// [onTap] is handed the id of the order whose pin was tapped, which is how the
+/// map tells the cards underneath which order to bring to the front.
 Set<Marker> buildOrderMarkers({
   required List<OrderModel> pending,
   required List<OrderModel> delivered,
+  void Function(String orderId)? onTap,
 }) {
   // Keyed by order id so the same order cannot be added twice, whichever list
   // it arrives in. Delivered is collected first and pending skips ids already
@@ -118,6 +122,7 @@ Set<Marker> buildOrderMarkers({
         order,
         hues[order.id]!,
         _fanOut(order.cityLocation!, i, town.length),
+        onTap,
       ));
     }
   }
@@ -166,7 +171,12 @@ LatLng _fanOut(LatLng centre, int index, int count) {
 // The info window carries the order number and the address rather than the
 // customer's name: those are what the driver matches against the card they are
 // holding, and a name on a map pin says nothing about where the pin is.
-Marker _pin(OrderModel order, double hue, LatLng position) {
+Marker _pin(
+  OrderModel order,
+  double hue,
+  LatLng position,
+  void Function(String orderId)? onTap,
+) {
   return Marker(
     markerId: MarkerId('order_${order.id}'),
     position: position,
@@ -175,5 +185,9 @@ Marker _pin(OrderModel order, double hue, LatLng position) {
       snippet: order.deliveryAddress,
     ),
     icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+    // Tapping a pin still opens its info window — Google Maps does that itself
+    // — and additionally brings that order's card to the front, so the pin and
+    // the card the driver acts on are the same order.
+    onTap: onTap == null ? null : () => onTap(order.id),
   );
 }

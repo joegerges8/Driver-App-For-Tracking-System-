@@ -16,9 +16,6 @@
 // driver ends up looking at is the height of the card inside it — no clipping,
 // and no band of white underneath.
 
-import 'dart:async';
-import 'dart:io';
-
 import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
@@ -30,82 +27,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 
-// The card shows the product thumbnail with a NetworkImage. Test bindings fail
-// every HTTP request with a 400, which surfaces as a test failure that has
-// nothing to do with the layout being measured, so requests are served a 1x1
-// transparent PNG instead.
-class _FakeImageHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) => _FakeHttpClient();
-}
-
-const List<int> _transparentPixelPng = <int>[
-  0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, //
-  0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-  0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-  0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,
-  0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-  0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
-  0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
-  0x42, 0x60, 0x82,
-];
-
-class _FakeHttpClient implements HttpClient {
-  @override
-  Future<HttpClientRequest> getUrl(Uri url) async => _FakeHttpClientRequest();
-
-  // Everything else the image loader touches — autoUncompress, timeouts — is
-  // configuration this fake has no use for.
-  @override
-  noSuchMethod(Invocation invocation) => null;
-}
-
-class _FakeHttpClientRequest implements HttpClientRequest {
-  @override
-  final HttpHeaders headers = _FakeHttpHeaders();
-
-  @override
-  Future<HttpClientResponse> close() async => _FakeHttpClientResponse();
-
-  @override
-  noSuchMethod(Invocation invocation) => null;
-}
-
-class _FakeHttpClientResponse implements HttpClientResponse {
-  @override
-  int get statusCode => HttpStatus.ok;
-
-  @override
-  int get contentLength => _transparentPixelPng.length;
-
-  @override
-  HttpClientResponseCompressionState get compressionState =>
-      HttpClientResponseCompressionState.notCompressed;
-
-  @override
-  StreamSubscription<List<int>> listen(
-    void Function(List<int> event)? onData, {
-    Function? onError,
-    void Function()? onDone,
-    bool? cancelOnError,
-  }) {
-    return Stream<List<int>>.fromIterable([_transparentPixelPng]).listen(
-      onData,
-      onError: onError,
-      onDone: onDone,
-      cancelOnError: cancelOnError,
-    );
-  }
-
-  @override
-  noSuchMethod(Invocation invocation) => null;
-}
-
-class _FakeHttpHeaders implements HttpHeaders {
-  @override
-  noSuchMethod(Invocation invocation) => null;
-}
+import 'support/fake_network_images.dart';
 
 // An order shaped like the ones a driver actually gets, with the longest text
 // each slot realistically carries.
@@ -186,8 +108,7 @@ Future<void> _pumpCards(
 }
 
 void main() {
-  setUpAll(() => HttpOverrides.global = _FakeImageHttpOverrides());
-  tearDownAll(() => HttpOverrides.global = null);
+  useFakeNetworkImages();
 
   group('the card box', () {
     for (final locale in [const Locale('en'), const Locale('ar')]) {

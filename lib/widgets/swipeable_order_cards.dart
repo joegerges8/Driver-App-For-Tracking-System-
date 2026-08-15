@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:delivery_boy_app/models/order_model.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
+import 'package:delivery_boy_app/provider/order_focus_controller.dart';
 import 'package:delivery_boy_app/widgets/order_card.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -39,8 +40,39 @@ double orderCardPageHeight({
       screenHeight * kMaxCardScreenFraction,
     );
 
+/// How the cards settle after a swipe.
+///
+/// PageView's default spring is tuned for full-screen pages and takes a
+/// noticeable moment to settle a short one like these, which is most of what
+/// made swiping between orders feel slow: the finger had long since finished
+/// and the card was still gliding into place. This one is stiffer and critically
+/// damped — it arrives quickly and does not wobble when it gets there — and it
+/// takes less of a flick to count as a fling, so a small flick moves a card
+/// instead of sagging back.
+class SnappyPageScrollPhysics extends ScrollPhysics {
+  const SnappyPageScrollPhysics({super.parent});
+
+  @override
+  SnappyPageScrollPhysics applyTo(ScrollPhysics? ancestor) =>
+      SnappyPageScrollPhysics(parent: buildParent(ancestor));
+
+  @override
+  SpringDescription get spring => SpringDescription.withDampingRatio(
+        mass: 0.3,
+        stiffness: 240,
+        ratio: 1.0,
+      );
+
+  @override
+  double get minFlingVelocity => 30;
+}
+
 class SwipeableOrderCards extends StatefulWidget {
-  const SwipeableOrderCards({super.key});
+  const SwipeableOrderCards({super.key, this.focus});
+
+  /// Pin taps from the map above. Null wherever the cards are shown without a
+  /// map beside them.
+  final OrderFocusController? focus;
 
   @override
   State<SwipeableOrderCards> createState() => _SwipeableOrderCardsState();
@@ -78,10 +110,53 @@ class _SwipeableOrderCardsState extends State<SwipeableOrderCards> {
 
   final GlobalKey _cardKey = GlobalKey();
 
+  // The orders as of the last build, so a pin tap arriving between builds can
+  // be turned into a page number without waiting for one.
+  List<OrderModel> _orders = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    widget.focus?.addListener(_onFocusRequested);
+  }
+
+  @override
+  void didUpdateWidget(SwipeableOrderCards oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.focus != widget.focus) {
+      oldWidget.focus?.removeListener(_onFocusRequested);
+      widget.focus?.addListener(_onFocusRequested);
+    }
+  }
+
   @override
   void dispose() {
+    widget.focus?.removeListener(_onFocusRequested);
     _pageController.dispose();
     super.dispose();
+  }
+
+  // A pin was tapped on the map: bring that order's card to the front.
+  //
+  // Animated rather than jumped so the driver can see which way the cards
+  // moved and how far — a card that simply appeared would leave them unsure
+  // whether they are looking at the order they tapped or the one they were on.
+  //
+  // Silently does nothing for an order with no card: a delivered order still
+  // has a green pin on the map after it has left the assigned list.
+  void _onFocusRequested() {
+    final orderId = widget.focus?.orderId;
+    if (orderId == null) return;
+
+    final target = _orders.indexWhere((o) => o.id == orderId);
+    if (target < 0 || target == _currentPage) return;
+    if (!_pageController.hasClients) return;
+
+    _pageController.animateToPage(
+      target,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   // Reads the laid-out card and, if it disagrees with the height the box is
@@ -163,13 +238,25 @@ class _SwipeableOrderCardsState extends State<SwipeableOrderCards> {
   @override
   Widget build(BuildContext context) {
     final orders = context.watch<DeliveryProvider>().orders;
-    if (orders.isEmpty) return const SizedBox.shrink();
+    if (orders.isEmpty) {
+      _orders = orders;
+      return const SizedBox.shrink();
+    }
 
+    _orders = orders;
     _syncPage(orders);
 
     final dotPage = _currentPage.clamp(0, orders.length - 1);
     final textScale = MediaQuery.textScalerOf(context).scale(1);
     _measureCard(textScale);
+
+    final boxHeight = _cardHeight(context, textScale);
+    // Whether the card fits the room it has been given. Unknown until the first
+    // measurement, and assumed true until then: guessing wrong for one frame
+    // costs a card that cannot be scrolled for that frame, and guessing the
+    // other way would turn scrolling on for every card that never needs it.
+    final cardFits =
+        _measuredCardHeight == null || _measuredCardHeight! <= boxHeight + 0.5;
 
     return Container(
       decoration: const BoxDecoration(
@@ -204,23 +291,44 @@ class _SwipeableOrderCardsState extends State<SwipeableOrderCards> {
           // so a card that wants more room than the cap allows is scrollable
           // rather than overflowing.
           SizedBox(
-            height: _cardHeight(context, textScale),
-            child: PageView.builder(
-              controller: _pageController,
-              itemCount: orders.length,
-              onPageChanged: (i) => setState(() {
-                _currentPage = i;
-                _currentOrderId = orders[i].id;
-              }),
-              itemBuilder: (context, index) => SingleChildScrollView(
-                // The key rides the first page only: every card has the same
-                // structure and every line in it is capped at one line, so one
-                // measurement describes all of them, and a key that moved
-                // between pages as the driver swiped would remeasure the same
-                // height on every swipe.
-                child: OrderCard(
-                  key: index == 0 ? _cardKey : null,
-                  order: orders[index],
+            height: boxHeight,
+            // The cards repaint as they slide; the map behind them does not
+            // need to. Without the boundary every swipe dirties the whole
+            // screen underneath.
+            child: RepaintBoundary(
+              child: PageView.builder(
+                controller: _pageController,
+                // See SnappyPageScrollPhysics: the default spring is what made
+                // a swipe feel like it was still finishing long after the
+                // finger had left.
+                physics: const SnappyPageScrollPhysics(
+                  parent: ClampingScrollPhysics(),
+                ),
+                itemCount: orders.length,
+                onPageChanged: (i) => setState(() {
+                  _currentPage = i;
+                  _currentOrderId = orders[i].id;
+                }),
+                itemBuilder: (context, index) => SingleChildScrollView(
+                  // The scroll view is here to give the card an unbounded
+                  // height to lay out into, which is what makes it measurable;
+                  // scrolling is only a fallback for a card too tall for the
+                  // room. When it fits — which is the normal case — its
+                  // scrolling is turned off, so a swipe no longer has to be
+                  // told apart from a vertical drag before it can start. That
+                  // disambiguation was the other half of the sluggishness.
+                  physics: cardFits
+                      ? const NeverScrollableScrollPhysics()
+                      : const ClampingScrollPhysics(),
+                  // The key rides the first page only: every card has the same
+                  // structure and every line in it is capped at one line, so one
+                  // measurement describes all of them, and a key that moved
+                  // between pages as the driver swiped would remeasure the same
+                  // height on every swipe.
+                  child: OrderCard(
+                    key: index == 0 ? _cardKey : null,
+                    order: orders[index],
+                  ),
                 ),
               ),
             ),

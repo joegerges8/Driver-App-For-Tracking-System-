@@ -18,8 +18,13 @@ class OrderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final delivery = context.watch<DeliveryProvider>();
-    final isOngoing = delivery.isDelivering(order.id);
+    // select, not watch: watching the provider rebuilt every card on screen
+    // whenever anything in it changed — a GPS ping, a poll that returned the
+    // same orders, another card's delivery being started — and those rebuilds
+    // landed in the middle of swipes. The only thing this card shows from the
+    // provider is whether this one order is under way.
+    final isOngoing =
+        context.select<DeliveryProvider, bool>((d) => d.isDelivering(order.id));
 
     return Column(
       mainAxisSize: MainAxisSize.min,

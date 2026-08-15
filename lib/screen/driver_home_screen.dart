@@ -2,6 +2,7 @@ import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/provider/current_location_provider.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
+import 'package:delivery_boy_app/provider/order_focus_controller.dart';
 import 'package:delivery_boy_app/services/google_maps_loader.dart';
 import 'package:delivery_boy_app/utils/order_pins.dart';
 import 'package:delivery_boy_app/utils/utils.dart';
@@ -31,6 +32,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     defaultValue: '',
   );
 
+  // Carries a tapped pin down to the cards, which bring that order to the
+  // front. Owned here because this is where the two halves of the screen meet.
+  final OrderFocusController _orderFocus = OrderFocusController();
+
   @override
   void initState() {
     super.initState();
@@ -56,6 +61,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   @override
   void dispose() {
     _mapController?.dispose();
+    _orderFocus.dispose();
     super.dispose();
   }
 
@@ -102,6 +108,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       ...buildOrderMarkers(
         pending: delivery.orders,
         delivered: delivery.todaysCompletedOrders,
+        onTap: _orderFocus.focus,
       ),
     };
   }
@@ -175,7 +182,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                       ),
 
                       // Swipeable order cards embedded below the map.
-                      const SwipeableOrderCards(),
+                      SwipeableOrderCards(focus: _orderFocus),
                     ],
                   ),
 
