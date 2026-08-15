@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:delivery_boy_app/utils/address.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 // One product line of an order: what it is and how many of it the driver is
@@ -221,10 +222,13 @@ class OrderModel {
     final city = (json['city'] ?? '').toString().trim();
     final area = (json['area'] ?? '').toString().trim();
     // The country the backend stores is deliberately left out: every order is
-    // delivered inside Lebanon, so the word only ate room on the card.
-    final deliveryAddress = [shippingAddress, city]
-        .where((p) => p.isNotEmpty)
-        .join(', ');
+    // delivered inside Lebanon, so the word only ate room on the card. The
+    // town is left out too when the address already names it — see
+    // buildDeliveryAddress, which is where that rule is written down and
+    // tested. Note that only the display drops these: the city and area
+    // fields below keep what the backend sent, since the area filter on the
+    // orders screen is built from them.
+    final deliveryAddress = buildDeliveryAddress(shippingAddress, city);
 
     // 1. Try explicit lat/lng columns first.
     LatLng? deliveryLocation = _tryLatLng(
