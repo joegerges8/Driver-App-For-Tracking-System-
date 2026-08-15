@@ -5,6 +5,7 @@ import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/provider/order_focus_controller.dart';
 import 'package:delivery_boy_app/services/google_maps_loader.dart';
 import 'package:delivery_boy_app/utils/order_pins.dart';
+import 'package:delivery_boy_app/utils/run_framer.dart';
 import 'package:delivery_boy_app/utils/utils.dart';
 import 'package:delivery_boy_app/widgets/swipeable_order_cards.dart';
 import 'package:flutter/material.dart';
@@ -22,21 +23,22 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   GoogleMapController? _mapController;
   // Cache the future so it doesn't reset on every rebuild.
   late final Future<bool> _mapsLoadedFuture;
-  // Whether the camera has already been put where it belongs, and whether the
-  // orders it should have been framed around had arrived by then.
-  //
-  // The two are separate because the answers arrive at different times: GPS
-  // resolves in a second or so, the orders take a network round trip. Framing
-  // on the driver alone the moment GPS lands would open the map on the street
-  // they are parked on — the thing this is meant to stop — so a location-only
-  // framing is provisional and is redone once the orders are in.
-  bool _hasFramedRun = false;
-  bool _hasFramedWithOrders = false;
+  // Decides when the camera may move on its own and what it frames. The
+  // decision lives outside this widget on purpose: it used to be woven into
+  // the rebuild timing here, a refactor lost one of its triggers, and a driver
+  // sat looking at the location provider's San Francisco fallback until the
+  // 30-second poll happened to rebuild the screen. See run_framer.dart for
+  // the policy; this screen only feeds it and animates what it returns.
+  final RunFramer _framer = RunFramer();
 
   // Set once the first orders request has come back, however it came back. A
   // driver with genuinely no orders has nothing to frame but themselves, and
   // this is what tells the camera to stop waiting for pins that are not coming.
   bool _ordersFetched = false;
+
+  // Guards against overlapping camera animations: decide() offers the same
+  // move again until it is committed, and two in flight would fight.
+  bool _framing = false;
   // Prevent the location-error toast from firing on every rebuild.
   bool _locationErrorShown = false;
 
@@ -58,6 +60,19 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   // logical pixels. A marker is drawn upwards from its point and is about 40
   // tall, so anything less puts the top pin's head under the edge.
   static const double _framePaddingPx = 64;
+
+  // Where the map opens before anything is known: the whole of Lebanon.
+  //
+  // The camera has to point somewhere before GPS or the orders have answered,
+  // and it used to point at the location provider's fallback — which is San
+  // Francisco, so every cold start opened on California until the framing ran.
+  // Every order this system carries is delivered inside Lebanon (the whole
+  // town-coordinate table is built on that), so the one thing known before
+  // anything loads is the country, and that is what the first frame shows.
+  static const CameraPosition _initialCamera = CameraPosition(
+    target: LatLng(33.9, 35.8),
+    zoom: 8.0,
+  );
 
   @override
   void initState() {
@@ -92,65 +107,51 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   void _onMapCreated(GoogleMapController controller) {
     _mapController = controller;
     // If the run is already known by the time the map is ready, frame it now.
-    _maybeFrameRun(_lastOrderPoints);
+    _maybeFrameRun();
   }
 
-  // Opens the map on the whole run: the driver's own position and every pin,
-  // far enough out that all of it is on screen at once.
-  //
-  // It used to drop straight onto the driver at zoom 15, which answers "which
-  // street am I on" — a question the driver can answer by looking up. What
-  // they cannot see from the cab is how the day is spread out, and that is
-  // what the pins were added for, so that is what the camera opens on.
-  //
-  // Runs at most twice: once provisionally when GPS lands, and once more when
-  // the orders arrive. After the orders have been framed it never moves the
-  // camera again, because from then on the camera belongs to the driver — a
-  // map that re-framed itself on every poll would drag them back out every
-  // time they zoomed in on where they were going.
-  Future<void> _maybeFrameRun(List<LatLng> orderPoints) async {
-    if (_hasFramedWithOrders || _mapController == null) return;
+  // Opens the map on the whole run — the pins and, once GPS lands, the driver
+  // — far enough out that all of it is on screen at once. The pins are never
+  // kept waiting for GPS: they are framed the moment they are known, and the
+  // frame is upgraded once when the fix arrives. All of that policy lives in
+  // RunFramer; what remains here is reading the providers and moving the
+  // camera.
+  Future<void> _maybeFrameRun() async {
+    if (_framing || _framer.done || _mapController == null || !mounted) return;
 
     final loc = context.read<CurrentLocationProvider>();
-    if (loc.isLoading) return;
+    final settled = !loc.isLoading;
+    final driverLocation =
+        settled && loc.errorMessage.isEmpty ? loc.currentLocation : null;
 
-    if (orderPoints.isEmpty) {
-      // Still on their way: framing on the driver alone now would be the
-      // street-level view all over again, so wait for them.
-      if (!_ordersFetched) return;
-      // Fetched and there are none. The driver alone is all there is to frame,
-      // and having framed it once, doing it again on every rebuild would drag
-      // the camera back from wherever they had moved it.
-      if (_hasFramedRun) return;
-    }
-
-    // GPS failing leaves currentLocation on its San Francisco fallback, which
-    // would stretch the box across the Atlantic. The orders alone are still
-    // worth framing.
-    final points = <LatLng>[
-      if (loc.errorMessage.isEmpty) loc.currentLocation,
-      ...orderPoints,
-    ];
-    if (points.isEmpty) return;
-
-    _hasFramedRun = true;
-    if (orderPoints.isNotEmpty) _hasFramedWithOrders = true;
+    final decision = _framer.decide(
+      orderPoints: _lastOrderPoints,
+      driverLocation: driverLocation,
+      locationSettled: settled,
+      ordersFetched: _ordersFetched,
+    );
+    if (decision == null) return;
 
     // Everything in one place — the driver standing in the town their only
     // order is in — has no box worth fitting, so it gets a plain zoom.
-    final single = singlePointOf(points);
+    final single = singlePointOf(decision.points);
     final update = single != null
         ? CameraUpdate.newLatLngZoom(single, 14)
-        : CameraUpdate.newLatLngBounds(boundsFor(points)!, _framePaddingPx);
+        : CameraUpdate.newLatLngBounds(
+            boundsFor(decision.points)!,
+            _framePaddingPx,
+          );
 
+    _framing = true;
     try {
       await _mapController!.animateCamera(update);
+      _framer.commit(decision);
     } catch (_) {
-      // newLatLngBounds throws on Android if the map has no size yet. Nothing
-      // is worth showing the driver over it — the map is simply left where it
-      // was, and the next attempt (or the driver's own finger) moves it.
-      _hasFramedRun = false;
-      _hasFramedWithOrders = false;
+      // newLatLngBounds throws on Android if the map has no size yet. The
+      // decision is left uncommitted, so the next provider notification offers
+      // the same move again; nothing is worth showing the driver over it.
+    } finally {
+      _framing = false;
     }
   }
 
@@ -161,23 +162,29 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   // Delivered means today's deliveries, not every delivery ever made: the map
   // is a picture of the run the driver is on, and last month's completed orders
   // would bury this morning's under a field of green.
+  // [currentLocation] is null until GPS has actually resolved: the provider
+  // starts on a San Francisco fallback, and drawing the driver's marker there
+  // put a blue pin in California on every cold start until the fix landed.
   Set<Marker> _buildMarkers(
-    LatLng currentLocation,
+    LatLng? currentLocation,
     Set<Marker> orderMarkers,
   ) {
     final l10n = context.l10n;
     return {
-      Marker(
-        markerId: const MarkerId("current_location"),
-        position: currentLocation,
-        infoWindow: InfoWindow(
-          title: l10n.currentLocation,
-          snippet: l10n.youAreHere,
+      if (currentLocation != null)
+        Marker(
+          markerId: const MarkerId("current_location"),
+          position: currentLocation,
+          infoWindow: InfoWindow(
+            title: l10n.currentLocation,
+            snippet: l10n.youAreHere,
+          ),
+          // Blue, not red: red now means "order still to deliver", and the
+          // driver's own position is the one pin on this map that is not a
+          // stop.
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
         ),
-        // Blue, not red: red now means "order still to deliver", and the
-        // driver's own position is the one pin on this map that is not a stop.
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-      ),
       ...orderMarkers,
     };
   }
@@ -199,16 +206,23 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     );
     _lastOrderPoints = orderMarkers.map((m) => m.position).toList();
 
-    // After the frame, because the map may not exist yet on this build and the
-    // camera cannot be moved before it does.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _maybeFrameRun(_lastOrderPoints);
-    });
-
     return Scaffold(
       backgroundColor: Colors.grey[100],
       body: Consumer<CurrentLocationProvider>(
         builder: (context, locationProvider, child) {
+          // The framing retry rides this builder and not the outer build: this
+          // is the one place that reruns for BOTH inputs — the orders (through
+          // the outer watch rebuilding the whole screen) and GPS resolving
+          // (through this Consumer). Scheduling it outside missed the GPS
+          // notification, and a driver whose orders beat their fix sat on the
+          // fallback map until the 30-second poll rebuilt the screen.
+          //
+          // After the frame, because the map may not exist yet on this build
+          // and the camera cannot be moved before it does.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _maybeFrameRun();
+          });
+
           if (locationProvider.errorMessage.isNotEmpty &&
               !_locationErrorShown) {
             _locationErrorShown = true;
@@ -237,19 +251,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                             ? GoogleMap(
                                 onMapCreated: _onMapCreated,
                                 markers: _buildMarkers(
-                                  locationProvider.currentLocation,
+                                  !locationProvider.isLoading &&
+                                          locationProvider
+                                              .errorMessage.isEmpty
+                                      ? locationProvider.currentLocation
+                                      : null,
                                   orderMarkers,
                                 ),
-                                // Wide from the very first frame. The camera is
-                                // framed to the run a moment later, and
-                                // opening at street level meanwhile would show
-                                // the driver a zoom-out they did not ask for.
-                                // It is also what they are left looking at if
-                                // the framing cannot run at all.
-                                initialCameraPosition: CameraPosition(
-                                  target: locationProvider.currentLocation,
-                                  zoom: 11.0,
-                                ),
+                                initialCameraPosition: _initialCamera,
                                 myLocationEnabled: true,
                                 myLocationButtonEnabled: false,
                                 mapType: MapType.normal,
@@ -270,8 +279,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                     ],
                   ),
 
-                  // Loading overlay — map stays alive underneath.
-                  if (locationProvider.isLoading)
+                  // Loading overlay — map stays alive underneath. Only while
+                  // there is nothing to look at: once the pins are known the
+                  // map is already useful, and GPS finishing its fix is not
+                  // worth hiding them for ten seconds.
+                  if (locationProvider.isLoading && _lastOrderPoints.isEmpty)
                     Container(
                       color: Colors.white.withAlpha(200),
                       child: Center(
