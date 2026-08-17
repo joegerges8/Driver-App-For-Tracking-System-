@@ -23,6 +23,11 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
   // Ensures we only fetch completed orders once per session.
   bool _hasFetched = false;
 
+  // Past days the driver has opened. Today is always expanded; every earlier
+  // day starts folded behind its header so the history stays short, and tapping
+  // the header's arrow reveals that day's orders.
+  final Set<DateTime> _expandedDays = {};
+
   @override
   void initState() {
     super.initState();
@@ -71,14 +76,10 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
   }
 
   // Groups orders by their delivery date, newest first.
-  // Returns a list of (dateLabel, orders) pairs.
-  List<MapEntry<String, List<OrderModel>>> _grouped(
-    BuildContext context,
-    List<OrderModel> all,
-  ) {
-    final l10n = context.l10n;
+  // Returns a list of (date, orders) pairs; the date keeps its identity so the
+  // build can tell today's group (always open) from a past one (collapsible).
+  List<MapEntry<DateTime, List<OrderModel>>> _grouped(List<OrderModel> all) {
     final currentDay = driverToday();
-    final yesterday = currentDay.subtract(const Duration(days: 1));
 
     final Map<DateTime, List<OrderModel>> map = {};
     for (final o in all) {
@@ -88,17 +89,18 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
 
     final sorted = map.keys.toList()..sort((a, b) => b.compareTo(a));
 
-    return sorted.map((date) {
-      String label;
-      if (date == currentDay) {
-        label = l10n.today;
-      } else if (date == yesterday) {
-        label = l10n.yesterday;
-      } else {
-        label = '${l10n.shortMonths[date.month - 1]} ${date.day}';
-      }
-      return MapEntry(label, map[date]!);
-    }).toList();
+    return sorted.map((date) => MapEntry(date, map[date]!)).toList();
+  }
+
+  // The label shown on a date group's header.
+  String _dateLabel(BuildContext context, DateTime date) {
+    final l10n = context.l10n;
+    final currentDay = driverToday();
+    if (date == currentDay) return l10n.today;
+    if (date == currentDay.subtract(const Duration(days: 1))) {
+      return l10n.yesterday;
+    }
+    return '${l10n.shortMonths[date.month - 1]} ${date.day}';
   }
 
   @override
@@ -171,7 +173,8 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
     }
 
     final filtered = _filtered(completedOrders);
-    final groups = _grouped(context, completedOrders);
+    final groups = _grouped(completedOrders);
+    final currentDay = driverToday();
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -217,13 +220,38 @@ class _ShipmentScreenState extends State<ShipmentScreen> {
           ),
         ] else ...[
           for (final group in groups) ...[
-            _DateGroupHeader(label: group.key),
-            const SizedBox(height: 8),
-            for (final order in group.value) ...[
-              _HistoryCard(order: order),
-              const SizedBox(height: 10),
+            if (group.key == currentDay) ...[
+              // Today's run stays spread out — it is what the driver came
+              // to check.
+              _DateGroupHeader(label: _dateLabel(context, group.key)),
+              const SizedBox(height: 8),
+              for (final order in group.value) ...[
+                _HistoryCard(order: order),
+                const SizedBox(height: 10),
+              ],
+              const SizedBox(height: 8),
+            ] else ...[
+              // A past day folds behind its header; the arrow opens it.
+              _DateGroupHeader(
+                label: _dateLabel(context, group.key),
+                summary:
+                    '${group.value.length} • \$${group.value.fold<int>(0, (sum, o) => sum + o.earnedPrice)}',
+                expanded: _expandedDays.contains(group.key),
+                onTap: () => setState(() {
+                  if (!_expandedDays.remove(group.key)) {
+                    _expandedDays.add(group.key);
+                  }
+                }),
+              ),
+              const SizedBox(height: 8),
+              if (_expandedDays.contains(group.key)) ...[
+                for (final order in group.value) ...[
+                  _HistoryCard(order: order),
+                  const SizedBox(height: 10),
+                ],
+              ],
+              const SizedBox(height: 8),
             ],
-            const SizedBox(height: 8),
           ],
         ],
       ],
@@ -426,11 +454,23 @@ class _PeriodToggle extends StatelessWidget {
 class _DateGroupHeader extends StatelessWidget {
   final String label;
 
-  const _DateGroupHeader({required this.label});
+  // Set on past days only: how many orders (and what they earned) sit behind
+  // the header, whether it is open, and the tap that toggles it. Today's
+  // header passes none of these and renders as a plain label.
+  final String? summary;
+  final bool expanded;
+  final VoidCallback? onTap;
+
+  const _DateGroupHeader({
+    required this.label,
+    this.summary,
+    this.expanded = false,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final row = Row(
       children: [
         Text(
           label,
@@ -442,7 +482,41 @@ class _DateGroupHeader extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Expanded(child: Divider(color: Colors.black12, thickness: 1)),
+        if (summary != null) ...[
+          const SizedBox(width: 8),
+          Text(
+            summary!,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Colors.black45,
+            ),
+          ),
+        ],
+        if (onTap != null)
+          AnimatedRotation(
+            turns: expanded ? 0.5 : 0,
+            duration: const Duration(milliseconds: 180),
+            child: const Icon(
+              Icons.keyboard_arrow_down,
+              size: 20,
+              color: Colors.black45,
+            ),
+          ),
       ],
+    );
+
+    if (onTap == null) return row;
+
+    // The whole header is the tap target, not just the arrow — a thin icon is
+    // hard to hit on a phone held one-handed in a van.
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: row,
+      ),
     );
   }
 }
