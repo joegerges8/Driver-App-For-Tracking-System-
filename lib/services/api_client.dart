@@ -307,6 +307,38 @@ class ApiClient {
     );
   }
 
+  // Records that the customer paid this order by Whish transfer at the door.
+  //
+  // The backend marks the order paid in Shopify first and only then mirrors
+  // it locally, so a thrown error here means nothing was recorded anywhere —
+  // the caller puts the order back to unpaid and tells the driver to try
+  // again. Not silent like the GPS ping: a payment the dispatcher never
+  // hears about is exactly the confusion this button exists to prevent.
+  static Future<void> markOrderPaidByWhish({
+    required String token,
+    required String orderId,
+  }) async {
+    final res = await _send(http.post(
+      _uri('/api/drivers/me/orders/$orderId/whish-payment'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+    ));
+
+    if (res.statusCode >= 200 && res.statusCode < 300) return;
+
+    String? message;
+    try {
+      final body = _decodeJson(res);
+      message = _errorMessage(body);
+    } catch (_) {}
+    throw ApiException(
+      message ?? 'Failed to record the Whish payment (HTTP ${res.statusCode})',
+      statusCode: res.statusCode,
+    );
+  }
+
   // Saves the driver's own note on one of their orders. An empty note clears
   // whatever was there, which is how the driver deletes a note.
   static Future<void> updateOrderNote({

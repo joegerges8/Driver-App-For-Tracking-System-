@@ -199,9 +199,14 @@ class OrderDetailScreen extends StatelessWidget {
                         SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            order.isPrepaid
-                                ? l10n.prepaidNoCash
-                                : (order.isPaid ? l10n.paid : l10n.unpaidCod),
+                            // Paid by Whish is its own state for the same
+                            // reason prepaid is: the driver holds no cash for
+                            // this order, and a bare "Paid" would hide that.
+                            order.isPaidByWhish
+                                ? l10n.paidByWhish
+                                : order.isPrepaid
+                                    ? l10n.prepaidNoCash
+                                    : (order.isPaid ? l10n.paid : l10n.unpaidCod),
                             style: TextStyle(
                               fontSize: 16,
                               color: order.isPaid ? iconColor : Colors.orange,
@@ -211,6 +216,32 @@ class OrderDetailScreen extends StatelessWidget {
                         ),
                       ],
                     ),
+                    // "Paid by Whish" — for the customer who decides at the
+                    // door to transfer instead of handing over cash. Hidden
+                    // once recorded, and for prepaid orders, where there is
+                    // no payment left to record. It stays available after
+                    // "Mark as Delivered", because that is exactly when a
+                    // driver notices the total was recorded as cash it never
+                    // was.
+                    if (!order.isPrepaid && !order.isPaidByWhish) ...[
+                      SizedBox(height: 14),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _markPaidByWhish(context),
+                          icon: Icon(Icons.phone_iphone, size: 18),
+                          label: Text(l10n.markPaidByWhish),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFE4032E),
+                            side: const BorderSide(color: Color(0xFFE4032E)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -390,7 +421,10 @@ class OrderDetailScreen extends StatelessWidget {
       driverName: driverName,
       orderNumber: order.orderNumber,
       price: order.price,
-      isPrepaid: order.isPrepaid,
+      // An order already paid by Whish reads "already paid" too — telling the
+      // customer it is cash on delivery after they transferred would only
+      // start an argument at the door.
+      isPrepaid: order.isPrepaid || order.isPaidByWhish,
     );
 
     // No canLaunchUrl guard on purpose: the Android manifest declares <queries>
@@ -400,6 +434,54 @@ class OrderDetailScreen extends StatelessWidget {
       Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(message)}'),
       mode: LaunchMode.externalApplication,
     );
+  }
+
+  // Records that the customer paid this order by Whish transfer.
+  //
+  // Confirmed first, because the payment is written straight into Shopify and
+  // undoing it there means issuing a refund — the same reason the dashboard's
+  // own Mark as Paid asks. On confirm the provider flips the order locally
+  // (the badge and the earnings totals update at once) and syncs; a failed
+  // sync rolls that back and surfaces here, so the driver never walks away
+  // believing a payment was recorded when it was not.
+  Future<void> _markPaidByWhish(BuildContext context) async {
+    final l10n = context.l10n;
+    final provider = context.read<DeliveryProvider>();
+    final token = context.read<AuthProvider>().token ?? '';
+    final messenger = ScaffoldMessenger.of(context);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l10n.whishConfirmTitle),
+        content: Text(l10n.whishConfirmBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(l10n.cancel),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(l10n.confirm),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await provider.markPaidByWhish(token: token);
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.whishPaymentRecorded)),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(l10n.whishPaymentFailed('$e')),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   // Opens the note editor and saves what the driver typed. The sheet closes as

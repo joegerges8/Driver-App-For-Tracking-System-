@@ -970,6 +970,67 @@ class DeliveryProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Records that the customer paid the order on screen by Whish transfer.
+  //
+  // Written locally first so the badge flips and the earnings totals drop the
+  // amount the moment the driver confirms, then synced. The backend records
+  // the payment in Shopify before answering, so a failure means nothing was
+  // recorded anywhere — the local copy is rolled back and the caller surfaces
+  // the error for the driver to try again with signal. Deliberately not
+  // queued like delivered/returned: a payment must never sit on the phone
+  // looking recorded while the store still shows the order as unpaid.
+  Future<void> markPaidByWhish({required String token}) async {
+    final order = _currentOrder;
+    if (order == null || order.id.isEmpty) return;
+    if (order.isPaidByWhish) return;
+
+    final previousPaid = order.isPaid;
+    final previousMethod = order.paymentMethod;
+
+    _applyPayment(order.id, isPaid: true, paymentMethod: 'WHISH');
+
+    try {
+      await ApiClient.markOrderPaidByWhish(token: token, orderId: order.id);
+    } catch (e) {
+      _applyPayment(
+        order.id,
+        isPaid: previousPaid,
+        paymentMethod: previousMethod,
+      );
+      rethrow; // caller shows error snackbar
+    }
+  }
+
+  // Writes a payment state into every copy of the order the provider holds:
+  // the one on screen, the assigned list behind it, and the Done tab — a
+  // Whish payment can be recorded before or after the delivery itself is
+  // marked, so the order may be sitting in either list.
+  void _applyPayment(
+    String orderId, {
+    required bool isPaid,
+    required String paymentMethod,
+  }) {
+    OrderModel apply(OrderModel o) =>
+        o.copyWith(isPaid: isPaid, paymentMethod: paymentMethod);
+
+    if (_currentOrder?.id == orderId) {
+      _currentOrder = apply(_currentOrder!);
+    }
+
+    final index = _orders.indexWhere((o) => o.id == orderId);
+    if (index != -1) {
+      _orders[index] = apply(_orders[index]);
+    }
+
+    final doneIndex = _completedOrders.indexWhere((o) => o.id == orderId);
+    if (doneIndex != -1) {
+      _completedOrders = List.of(_completedOrders)
+        ..[doneIndex] = apply(_completedOrders[doneIndex]);
+    }
+
+    notifyListeners();
+  }
+
   // Updates UI immediately, then syncs RETURNED to the backend, on exactly the
   // same terms as markDelivered above: true if it landed, false if it is
   // queued for when the connection is back, and it only throws if the backend
