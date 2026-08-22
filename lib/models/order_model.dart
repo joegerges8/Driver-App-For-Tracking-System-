@@ -115,14 +115,6 @@ class OrderModel {
   // where the customer actually paid, and again in the driver's total.
   final bool isPrepaid;
 
-  // How the customer actually paid, when it was not the default for the
-  // order: 'WHISH' when the driver recorded a Whish transfer at the door
-  // instead of taking cash. Empty for ordinary COD and online payments.
-  // Mirrors the backend's payment_method column; like a prepaid order, a
-  // Whish order put no cash in the driver's bag, so earnedPrice counts it
-  // as 0.
-  final String paymentMethod;
-
   // The city extracted from the backend shipping address.
   final String city;
 
@@ -169,13 +161,9 @@ class OrderModel {
     this.area = '',
     this.isPaid = false,
     this.isPrepaid = false,
-    this.paymentMethod = '',
     this.deliveredAt,
     this.orderStatus = '',
   });
-
-  // Whether the driver recorded this order as paid by Whish transfer.
-  bool get isPaidByWhish => paymentMethod == 'WHISH';
 
   // Returns a copy with only the named fields changed. OrderModel is immutable
   // — every field is final — so an update means building a new instance, and
@@ -186,7 +174,6 @@ class OrderModel {
     String? pickupAddress,
     String? driverNote,
     bool? isPaid,
-    String? paymentMethod,
     DateTime? deliveredAt,
   }) {
     return OrderModel(
@@ -212,9 +199,6 @@ class OrderModel {
       // during the delivery may change it — that is the distinction the
       // earnings totals rely on. It is deliberately not a parameter here.
       isPrepaid: isPrepaid,
-      // paymentMethod, unlike isPrepaid, is written during the delivery:
-      // it is set the moment the driver records a Whish payment.
-      paymentMethod: paymentMethod ?? this.paymentMethod,
       // The moment the delivery was completed. Passed in when the driver marks
       // an order delivered on this phone, so the finished order carries a
       // completion time before the backend has confirmed one — that timestamp
@@ -225,9 +209,8 @@ class OrderModel {
   }
 
   // What this order actually contributes to the driver's earnings: the cash
-  // collected on delivery, which is nothing for an order paid online — or
-  // paid by Whish at the door, where the money also never touched the bag.
-  int get earnedPrice => isPrepaid || isPaidByWhish ? 0 : price;
+  // collected on delivery, which is nothing for an order paid online.
+  int get earnedPrice => isPrepaid ? 0 : price;
 
   factory OrderModel.fromBackend(Map<String, dynamic> json) {
     final id = json['id'];
@@ -334,8 +317,6 @@ class OrderModel {
       // been collected, so we treat the order as unpaid.
       isPaid: financialStatus == 'paid',
       isPrepaid: isPrepaid,
-      paymentMethod:
-          (json['payment_method'] ?? '').toString().trim().toUpperCase(),
       deliveredAt: deliveredAt,
       orderStatus:
           (json['order_status'] ?? '').toString().trim().toUpperCase(),

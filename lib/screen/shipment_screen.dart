@@ -609,26 +609,25 @@ class _HistoryCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 // The amount shown is what the driver collected, matching the
-                // earnings card above: $0 for an order paid online or by
-                // Whish at the door, with the order's own price kept visible
-                // underneath so the card still says what the delivery was
-                // worth.
+                // earnings card above: $0 for an order paid online, with the
+                // order's own price kept visible underneath so the card still
+                // says what the delivery was worth.
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
                       '\$${order.earnedPrice}',
                       style: TextStyle(
-                        color: order.isPrepaid || order.isPaidByWhish
+                        color: order.isPrepaid
                             ? Colors.black38
                             : buttonMainColor,
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
                       ),
                     ),
-                    if (order.isPrepaid || order.isPaidByWhish)
+                    if (order.isPrepaid)
                       Text(
-                        '\$${order.price} ${order.isPaidByWhish ? context.l10n.paidByWhish.toLowerCase() : context.l10n.prepaid.toLowerCase()}',
+                        '\$${order.price} ${context.l10n.prepaid.toLowerCase()}',
                         style: const TextStyle(
                           fontSize: 11,
                           color: Colors.black38,

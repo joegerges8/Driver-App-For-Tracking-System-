@@ -150,19 +150,6 @@ class AppLocalizations {
   // collected for them, so they count as 0 in the earnings totals.
   String get prepaid => _t('prepaid');
   String get prepaidNoCash => _t('prepaidNoCash');
-  // The customer paid by Whish transfer at the door. Shown as the payment
-  // state once recorded; the amount counts as 0 in the earnings totals, since
-  // the money went to the Whish account and never into the driver's bag.
-  String get paidByWhish => _t('paidByWhish');
-  // The button that records it, and the confirmation around it — the payment
-  // is written to Shopify, so it needs a deliberate yes before it goes out.
-  String get markPaidByWhish => _t('markPaidByWhish');
-  String get whishConfirmTitle => _t('whishConfirmTitle');
-  String get whishConfirmBody => _t('whishConfirmBody');
-  String get confirm => _t('confirm');
-  String get whishPaymentRecorded => _t('whishPaymentRecorded');
-  String whishPaymentFailed(String error) =>
-      '${_t('whishPaymentFailed')}: $error';
   String get pickupLocation => _t('pickupLocation');
   String get deliveryLocation => _t('deliveryLocation');
   String get you => _t('you');
@@ -334,16 +321,6 @@ class AppLocalizations {
     'unpaidCod': 'Unpaid (COD)',
     'prepaid': 'Prepaid',
     'prepaidNoCash': 'Paid online — no cash collected',
-    'paidByWhish': 'Paid by Whish',
-    'markPaidByWhish': 'Paid by Whish',
-    'whishConfirmTitle': 'Mark as paid by Whish?',
-    'whishConfirmBody':
-        'Only confirm after the Whish transfer has gone through. '
-        'This records the payment in Shopify, and the amount will not '
-        'count in your collected cash.',
-    'confirm': 'Confirm',
-    'whishPaymentRecorded': 'Payment by Whish recorded',
-    'whishPaymentFailed': 'Could not record the Whish payment',
     'pickupLocation': 'Pickup Location',
     'deliveryLocation': 'Delivery Location',
     'you': 'You',
@@ -528,15 +505,6 @@ class AppLocalizations {
     'unpaidCod': 'غير مدفوع (الدفع عند الاستلام)',
     'prepaid': 'مدفوع مسبقاً',
     'prepaidNoCash': 'تم الدفع عبر الإنترنت — لا يوجد مبلغ مُحصَّل',
-    'paidByWhish': 'مدفوع عبر ويش',
-    'markPaidByWhish': 'مدفوع عبر ويش',
-    'whishConfirmTitle': 'تسجيل الطلب كمدفوع عبر ويش؟',
-    'whishConfirmBody':
-        'أكّد فقط بعد وصول تحويل ويش. سيتم تسجيل الدفعة في شوبيفاي، '
-        'ولن يُحتسب المبلغ ضمن المبلغ النقدي الذي جمعته.',
-    'confirm': 'تأكيد',
-    'whishPaymentRecorded': 'تم تسجيل الدفع عبر ويش',
-    'whishPaymentFailed': 'تعذّر تسجيل الدفع عبر ويش',
     'pickupLocation': 'موقع الاستلام',
     'deliveryLocation': 'موقع التوصيل',
     'you': 'أنت',
