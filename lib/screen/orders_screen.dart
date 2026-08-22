@@ -1130,25 +1130,25 @@ class _CompletedOrderCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    // Mirrors the earnings strip: a prepaid order earned
-                    // nothing, so it shows $0 with its own price kept as a
-                    // caption.
+                    // Mirrors the earnings strip: a prepaid or Whish-paid
+                    // order earned nothing, so it shows $0 with its own
+                    // price kept as a caption.
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
                           '\$${order.earnedPrice}',
                           style: TextStyle(
-                            color: order.isPrepaid
+                            color: order.isPrepaid || order.isPaidByWhish
                                 ? Colors.black38
                                 : buttonMainColor,
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
                           ),
                         ),
-                        if (order.isPrepaid)
+                        if (order.isPrepaid || order.isPaidByWhish)
                           Text(
-                            '\$${order.price} ${context.l10n.prepaid.toLowerCase()}',
+                            '\$${order.price} ${order.isPaidByWhish ? context.l10n.paidByWhish.toLowerCase() : context.l10n.prepaid.toLowerCase()}',
                             style: const TextStyle(
                               fontSize: 11,
                               color: Colors.black38,

@@ -272,8 +272,21 @@ class DeliveryProvider extends ChangeNotifier {
   // [at] is when the delivery actually happened, for the case where that is
   // not now: an order finished offline and read back out of the outbox after a
   // restart keeps the time the driver marked it, not the time the app reopened.
-  OrderModel _withDeliveryRecorded(OrderModel order, {DateTime? at}) {
-    return order.copyWith(isPaid: true, deliveredAt: at ?? DateTime.now());
+  //
+  // [paidByWhish] marks the copy as paid by Whish transfer rather than cash —
+  // the "Delivered & Paid by Whish" button. That is what flips the badge to
+  // "Paid by Whish" and zeroes the order's earnedPrice the moment the driver
+  // taps, without waiting for the backend to confirm.
+  OrderModel _withDeliveryRecorded(
+    OrderModel order, {
+    DateTime? at,
+    bool paidByWhish = false,
+  }) {
+    return order.copyWith(
+      isPaid: true,
+      deliveredAt: at ?? DateTime.now(),
+      paymentMethod: paidByWhish ? 'WHISH' : null,
+    );
   }
 
   // Fetches the list of assigned (non-delivered) orders for this driver
@@ -911,14 +924,25 @@ class DeliveryProvider extends ChangeNotifier {
   // the backend actively refused the change — an order that is no longer this
   // driver's — because that is the one case where trying again cannot help and
   // the driver needs to be told now.
-  Future<bool> markDelivered({required String token}) async {
+  //
+  // [paidByWhish] is the "Delivered & Paid by Whish" button: the customer
+  // transferred at the door instead of handing over cash. The method rides
+  // the same outbox as the delivery itself, so a Whish delivery marked with
+  // no signal reaches the backend as a Whish delivery whenever it syncs, and
+  // the amount stays out of the earnings totals locally from the first tap.
+  Future<bool> markDelivered({
+    required String token,
+    bool paidByWhish = false,
+  }) async {
     final orderId = _currentOrder?.id;
-    completeDelivery(); // instant UI update — removes from pending, adds to completed
+    // instant UI update — removes from pending, adds to completed
+    completeDelivery(paidByWhish: paidByWhish);
     if (orderId == null || orderId.isEmpty) return true;
     return _recordStatusChange(
       orderId: orderId,
       status: 'DELIVERED',
       token: token,
+      paymentMethod: paidByWhish ? 'WHISH' : null,
     );
   }
 
@@ -998,11 +1022,13 @@ class DeliveryProvider extends ChangeNotifier {
     required String orderId,
     required String status,
     required String token,
+    String? paymentMethod,
   }) async {
     final change = PendingStatusChange(
       orderId: orderId,
       status: status,
       occurredAt: DateTime.now(),
+      paymentMethod: paymentMethod,
     );
 
     // Marked until the backend confirms: this is what protects the order from
@@ -1039,6 +1065,7 @@ class DeliveryProvider extends ChangeNotifier {
         orderId: change.orderId,
         status: change.status,
         occurredAt: change.occurredAt,
+        paymentMethod: change.paymentMethod,
       );
       await _clearPending(change.orderId);
       return const _StatusSyncOutcome(sent: true);
@@ -1167,7 +1194,11 @@ class DeliveryProvider extends ChangeNotifier {
             _returnedOrders.where((o) => o.id != order.id).toList();
         if (!_completedOrders.any((o) => o.id == order.id)) {
           _completedOrders = [
-            _withDeliveryRecorded(order, at: change.occurredAt),
+            _withDeliveryRecorded(
+              order,
+              at: change.occurredAt,
+              paidByWhish: change.isPaidByWhish,
+            ),
             ..._completedOrders,
           ];
         }
@@ -1185,7 +1216,11 @@ class DeliveryProvider extends ChangeNotifier {
   // Local state update for a finished delivery. Removes the order from the
   // pending list and prepends it to completedOrders so the Completed tab and
   // earnings strip update immediately without a refetch.
-  void completeDelivery() {
+  //
+  // [paidByWhish] carries the payment method into the local copy, so a Whish
+  // delivery reads "Paid by Whish" — and counts $0 in the earnings strip —
+  // from the moment of the tap.
+  void completeDelivery({bool paidByWhish = false}) {
     if (_currentOrder != null) {
       // Create a paid copy of the order before moving it to the completed list.
       // This is the "optimistic UI update" pattern: we assume the backend PATCH
@@ -1193,7 +1228,8 @@ class DeliveryProvider extends ChangeNotifier {
       // "Paid" the instant they tap "Mark as Delivered", without having to wait
       // for the network round-trip to finish. If the API call later fails, the
       // caller (order_detail_screen) shows an error snackbar.
-      final paidOrder = _withDeliveryRecorded(_currentOrder!);
+      final paidOrder =
+          _withDeliveryRecorded(_currentOrder!, paidByWhish: paidByWhish);
 
       // Remove the order from the active/pending list now that it is done.
       _orders.removeWhere((o) => o.id == _currentOrder!.id);

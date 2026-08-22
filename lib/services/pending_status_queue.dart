@@ -55,6 +55,7 @@ class PendingStatusChange {
     required this.orderId,
     required this.status,
     required this.occurredAt,
+    this.paymentMethod,
   });
 
   /// Backend order id.
@@ -66,19 +67,30 @@ class PendingStatusChange {
   /// When the driver chose it, which is not when it will be sent.
   final DateTime occurredAt;
 
+  /// 'WHISH' when the driver used "Delivered & Paid by Whish" — the customer
+  /// transferred instead of handing over cash. Null for ordinary deliveries.
+  /// Stored with the outcome so a Whish delivery marked in a dead spot still
+  /// reaches the backend as a Whish delivery, however much later it syncs.
+  final String? paymentMethod;
+
   bool get isDelivered => status == 'DELIVERED';
   bool get isReturned => status == 'RETURNED';
+  bool get isPaidByWhish => paymentMethod == 'WHISH';
 
   Map<String, dynamic> toJson() => {
         'orderId': orderId,
         'status': status,
         'occurredAt': occurredAt.toUtc().toIso8601String(),
+        if (paymentMethod != null) 'paymentMethod': paymentMethod,
       };
 
   static PendingStatusChange? fromJson(Map<String, dynamic> json) {
     final orderId = json['orderId'];
     final status = json['status'];
     final occurredAt = DateTime.tryParse('${json['occurredAt']}');
+    // Optional, and absent from entries written by older builds — those are
+    // ordinary deliveries, which null already means.
+    final paymentMethod = json['paymentMethod'];
 
     if (orderId is! String || orderId.isEmpty) return null;
     if (status is! String || status.isEmpty) return null;
@@ -88,6 +100,10 @@ class PendingStatusChange {
       orderId: orderId,
       status: status,
       occurredAt: occurredAt.toLocal(),
+      paymentMethod:
+          paymentMethod is String && paymentMethod.isNotEmpty
+              ? paymentMethod
+              : null,
     );
   }
 }

@@ -572,6 +572,10 @@ Future<void> _flushPendingStatuses(
         body: jsonEncode({
           'status': change.status,
           'occurred_at': change.occurredAt.toUtc().toIso8601String(),
+          // A Whish delivery flushed from here must arrive as one, the same
+          // as when the app itself sends it (ApiClient.updateOrderStatus).
+          if (change.paymentMethod != null)
+            'payment_method': change.paymentMethod,
         }),
       ).timeout(_requestTimeout);
 

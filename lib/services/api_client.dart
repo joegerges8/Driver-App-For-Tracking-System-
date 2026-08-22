@@ -275,11 +275,18 @@ class ApiClient {
   // dashboard would date it to the moment it synced. The backend ignores a
   // timestamp in the future or implausibly far in the past and stamps its own
   // clock instead, so a phone with the wrong date cannot rewrite history.
+  //
+  // [paymentMethod] is 'WHISH' when the driver used "Delivered & Paid by
+  // Whish": the backend then records the payment in Shopify as a Whish
+  // transfer, labels the order "Paid by Whish" on the dashboard, and keeps
+  // its amount out of the cash totals. Sent on the status request rather than
+  // separately so the two can never land without each other.
   static Future<void> updateOrderStatus({
     required String token,
     required String orderId,
     required String status,
     DateTime? occurredAt,
+    String? paymentMethod,
   }) async {
     final res = await _send(http.patch(
       _uri('/api/drivers/me/orders/$orderId/status'),
@@ -291,6 +298,7 @@ class ApiClient {
         'status': status,
         if (occurredAt != null)
           'occurred_at': occurredAt.toUtc().toIso8601String(),
+        if (paymentMethod != null) 'payment_method': paymentMethod,
       }),
     ));
 
