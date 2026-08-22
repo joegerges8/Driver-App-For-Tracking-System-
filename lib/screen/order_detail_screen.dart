@@ -199,9 +199,14 @@ class OrderDetailScreen extends StatelessWidget {
                         SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            order.isPrepaid
-                                ? l10n.prepaidNoCash
-                                : (order.isPaid ? l10n.paid : l10n.unpaidCod),
+                            // Paid by Whish is its own state for the same
+                            // reason prepaid is: the driver holds no cash for
+                            // this order, and a bare "Paid" would hide that.
+                            order.isPaidByWhish
+                                ? l10n.paidByWhish
+                                : order.isPrepaid
+                                    ? l10n.prepaidNoCash
+                                    : (order.isPaid ? l10n.paid : l10n.unpaidCod),
                             style: TextStyle(
                               fontSize: 16,
                               color: order.isPaid ? iconColor : Colors.orange,
@@ -301,7 +306,13 @@ class OrderDetailScreen extends StatelessWidget {
       ),
       // The whole delivery flow lives in this one bar:
       //   • Before starting  → a single "Start Delivery" button.
-      //   • After starting   → "Mark as Returned" / "Mark as Delivered".
+      //   • After starting   → "Mark as Returned" / "Mark as Delivered", with
+      //     "Delivered & Paid by Whish" underneath for the customer who
+      //     decides at the door to transfer instead of handing over cash —
+      //     one tap closes the order and records the payment method together,
+      //     so the dashboard reads "Paid by Whish" and the amount stays out
+      //     of the driver's earnings. A prepaid order does not show it: the
+      //     payment already happened, there is nothing left to record.
       // There is no accept/decline step, no pickup step and no in-app map:
       // the dispatcher flips the order to PICKED_UP from the dashboard, which
       // is what reveals the driver on the customer's tracking page. The GPS
@@ -317,29 +328,47 @@ class OrderDetailScreen extends StatelessWidget {
                   child: Padding(
                     padding: EdgeInsets.symmetric(horizontal: 20, vertical: 30),
                     child: isDelivering
-                        ? Row(
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Expanded(
-                                child: CustomButton(
-                                  color: declineOrder,
-                                  textColor: Colors.black54,
-                                  title: l10n.markAsReturned,
-                                  onPressed: () => _finishDelivery(
-                                    context,
-                                    returned: true,
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: CustomButton(
+                                      color: declineOrder,
+                                      textColor: Colors.black54,
+                                      title: l10n.markAsReturned,
+                                      onPressed: () => _finishDelivery(
+                                        context,
+                                        returned: true,
+                                      ),
+                                    ),
                                   ),
-                                ),
+                                  SizedBox(width: 10),
+                                  Expanded(
+                                    child: CustomButton(
+                                      title: l10n.markAsDelivered,
+                                      onPressed: () => _finishDelivery(
+                                        context,
+                                        returned: false,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                              SizedBox(width: 10),
-                              Expanded(
-                                child: CustomButton(
-                                  title: l10n.markAsDelivered,
+                              if (!order.isPrepaid) ...[
+                                SizedBox(height: 10),
+                                CustomButton(
+                                  color: iconColor,
+                                  title: l10n.deliveredPaidByWhish,
                                   onPressed: () => _finishDelivery(
                                     context,
                                     returned: false,
+                                    paidByWhish: true,
                                   ),
                                 ),
-                              ),
+                              ],
                             ],
                           )
                         : CustomButton(
@@ -390,7 +419,10 @@ class OrderDetailScreen extends StatelessWidget {
       driverName: driverName,
       orderNumber: order.orderNumber,
       price: order.price,
-      isPrepaid: order.isPrepaid,
+      // An order already paid by Whish reads "already paid" too — telling the
+      // customer it is cash on delivery after they transferred would only
+      // start an argument at the door.
+      isPrepaid: order.isPrepaid || order.isPaidByWhish,
     );
 
     // No canLaunchUrl guard on purpose: the Android manifest declares <queries>
@@ -497,9 +529,16 @@ class OrderDetailScreen extends StatelessWidget {
   // the orders list. The provider updates local state straight away and syncs
   // the status to the backend in the background; a failed sync surfaces as an
   // error snackbar rather than blocking the driver.
+  //
+  // [paidByWhish] is the third button — the customer transferred by Whish at
+  // the door instead of paying cash. It alone asks for confirmation first:
+  // the tap records a payment in Shopify (undoing that means a refund) and
+  // zeroes the order in the driver's earnings, and it sits right under the
+  // ordinary Delivered button where a slip of the thumb can land.
   Future<void> _finishDelivery(
     BuildContext context, {
     required bool returned,
+    bool paidByWhish = false,
   }) async {
     final l10n = context.l10n;
     final provider = context.read<DeliveryProvider>();
@@ -507,16 +546,40 @@ class OrderDetailScreen extends StatelessWidget {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
 
+    if (paidByWhish) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(l10n.whishConfirmTitle),
+          content: Text(l10n.whishConfirmBody),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(l10n.cancel),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(l10n.confirm),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+      if (!context.mounted) return;
+    }
+
     final update = returned
         ? provider.markReturned(token: token)
-        : provider.markDelivered(token: token);
+        : provider.markDelivered(token: token, paidByWhish: paidByWhish);
 
     showAppSnackbar(
       context: context,
       type: SnackbarType.success,
       description: returned
           ? l10n.orderMarkedReturned
-          : l10n.orderMarkedDelivered,
+          : paidByWhish
+              ? l10n.whishPaymentRecorded
+              : l10n.orderMarkedDelivered,
     );
 
     if (navigator.canPop()) navigator.pop();
