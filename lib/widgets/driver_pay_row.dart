@@ -35,7 +35,7 @@ class DriverPayRow extends StatelessWidget {
         ),
         const SizedBox(width: 12),
         Text(
-          '\$${driverPayFor(count)}',
+          '\$${driverPayLabel(count)}',
           style: const TextStyle(
             color: Colors.white,
             fontSize: 26,

@@ -14,9 +14,17 @@
 // the full fee, unlike earnedPrice which counts it as 0.
 
 // The flat fee, in dollars, the driver is paid for each completed delivery.
+// Not necessarily a whole number of dollars, hence the double.
 // One constant so the Orders and Shipment screens can never disagree; change it
 // here and both screens follow.
-const int driverFeePerDelivery = 2;
+const double driverFeePerDelivery = 2.5;
 
 // What the store owes the driver for [completedCount] delivered orders.
-int driverPayFor(int completedCount) => completedCount * driverFeePerDelivery;
+double driverPayFor(int completedCount) =>
+    completedCount * driverFeePerDelivery;
+
+// The pay as it appears on the banner, e.g. "17.50". Always two decimals: the
+// fee is no longer a whole number, so a driver comparing "$17.5" with "$20"
+// should not have to work out which is bigger.
+String driverPayLabel(int completedCount) =>
+    driverPayFor(completedCount).toStringAsFixed(2);

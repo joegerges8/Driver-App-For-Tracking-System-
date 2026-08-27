@@ -18,4 +18,15 @@ void main() {
       expect(driverPayFor(7), 7 * driverFeePerDelivery);
     });
   });
+
+  group('driverPayLabel', () {
+    // The fee is not a whole number of dollars, so the banner has to show the
+    // cents rather than a bare "17.5" that reads like a smaller figure.
+    test('always shows two decimals', () {
+      expect(driverPayLabel(0), '0.00');
+      expect(driverPayLabel(1), '2.50');
+      expect(driverPayLabel(7), '17.50');
+      expect(driverPayLabel(2), '5.00');
+    });
+  });
 }
