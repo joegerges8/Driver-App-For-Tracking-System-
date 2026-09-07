@@ -328,6 +328,12 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
   bool _loading = false;
   String? _error;
 
+  // "Forgot your current password?" — set from the link under the current
+  // password field. Hides that field and sends the new password on its own:
+  // the driver is logged in, so the session is proof enough of who they are,
+  // and a driver locked out of their own settings has no other way through.
+  bool _forgotCurrent = false;
+
   @override
   void dispose() {
     _currentCtrl.dispose();
@@ -356,10 +362,15 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
       _error = null;
     });
     try {
-      await context.read<AuthProvider>().changePassword(
-        currentPassword: _currentCtrl.text,
-        newPassword: _newCtrl.text,
-      );
+      final auth = context.read<AuthProvider>();
+      if (_forgotCurrent) {
+        await auth.resetOwnPassword(newPassword: _newCtrl.text);
+      } else {
+        await auth.changePassword(
+          currentPassword: _currentCtrl.text,
+          newPassword: _newCtrl.text,
+        );
+      }
       if (!mounted) return;
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -386,17 +397,40 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              l10n.changePassword,
+              _forgotCurrent ? l10n.resetPassword : l10n.changePassword,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            _PasswordField(
-              controller: _currentCtrl,
-              label: l10n.currentPassword,
-              validator: (v) =>
-                  (v == null || v.isEmpty) ? l10n.fieldRequired : null,
-            ),
-            const SizedBox(height: 12),
+            if (!_forgotCurrent) ...[
+              _PasswordField(
+                controller: _currentCtrl,
+                label: l10n.currentPassword,
+                validator: (v) =>
+                    (v == null || v.isEmpty) ? l10n.fieldRequired : null,
+              ),
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: TextButton(
+                  onPressed: _loading
+                      ? null
+                      : () => setState(() {
+                            _forgotCurrent = true;
+                            _error = null;
+                          }),
+                  style: TextButton.styleFrom(
+                    foregroundColor: buttonMainColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    l10n.forgotCurrentPassword,
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+            ],
             _PasswordField(
               controller: _newCtrl,
               label: l10n.newPassword,

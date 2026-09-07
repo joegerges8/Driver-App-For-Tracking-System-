@@ -229,6 +229,28 @@ class AuthProvider extends ChangeNotifier {
     );
   }
 
+  // Forgot password from the login screen: no session, so identity is the
+  // email + phone pair the backend checks. Nothing here changes — the driver
+  // logs in afterwards with the new password like anyone else.
+  Future<void> resetForgottenPassword({
+    required String email,
+    required String phone,
+    required String newPassword,
+  }) {
+    return ApiClient.resetForgottenPassword(
+      email: email,
+      phone: phone,
+      newPassword: newPassword,
+    );
+  }
+
+  // The profile screen's "Forgot your current password?": the stored token
+  // stands in for the current password.
+  Future<void> resetOwnPassword({required String newPassword}) async {
+    if (_token == null || _token!.isEmpty) throw ApiException('Not authenticated');
+    await ApiClient.resetOwnPassword(token: _token!, newPassword: newPassword);
+  }
+
   // Fetches fresh driver data from GET /api/drivers/me and updates _driver.
   // Called by ProfileScreen on load and on pull-to-refresh.
   // Errors are swallowed intentionally — the profile still shows the stale data

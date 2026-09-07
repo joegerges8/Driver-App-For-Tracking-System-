@@ -2,6 +2,7 @@ import 'package:delivery_boy_app/l10n/app_localizations.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/route.dart';
 import 'package:delivery_boy_app/screen/app_main_screen.dart';
+import 'package:delivery_boy_app/screen/reset_password_screen.dart';
 import 'package:delivery_boy_app/screen/signup_screen.dart';
 import 'package:delivery_boy_app/utils/colors.dart';
 import 'package:delivery_boy_app/widgets/auth_widgets.dart';
@@ -199,7 +200,36 @@ class _LoginScreenState extends State<LoginScreen> {
                           setState(() => _obscurePassword = !_obscurePassword),
                     ),
                   ),
-                  const SizedBox(height: 32),
+                  // The way back in for a driver who cannot remember their
+                  // password. Opens the reset screen with whatever email is
+                  // already typed, so they only have to add the phone.
+                  Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: TextButton(
+                      onPressed: auth.isBusy
+                          ? null
+                          : () => NavigationHelper.push(
+                                context,
+                                ResetPasswordScreen(
+                                  initialEmail: _emailController.text.trim(),
+                                ),
+                              ),
+                      style: TextButton.styleFrom(
+                        foregroundColor: buttonMainColor,
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        minimumSize: const Size(0, 36),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: Text(
+                        l10n.forgotPassword,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   AuthButton(
                     label: l10n.logIn,
                     loading: auth.isBusy,
