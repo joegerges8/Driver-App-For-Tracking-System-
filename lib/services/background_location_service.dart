@@ -16,6 +16,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 // SharedPreferences keys — must match auth_provider.dart's _tokenKey
 const _tokenKey = 'driver_auth_token';
 
+// Set by this isolate when the backend answers a location post with 401 — the
+// token has expired (they last 30 days) or been invalidated. Read by
+// AuthProvider when the app is next opened, so the driver lands on the login
+// screen with an explanation instead of on a home screen that cannot load
+// anything.
+//
+// This used to be counted as an ordinary failed tick, and three of those put
+// "Your location stopped reaching the office. Check your settings." in front
+// of the driver — which sent two drivers with location on and battery
+// unrestricted looking for a phone problem that did not exist.
+const kSessionExpiredKey = 'driver_session_expired';
+
 // The set of orders the driver has started and not yet finished. A driver can
 // carry several orders at once (a batch run), and every one of them needs its
 // own stream of GPS pings — each order has its own customer watching its own
@@ -358,13 +370,32 @@ void _onStart(ServiceInstance service) async {
       // with nothing assigned is precisely who they are looking for when the
       // next order lands. This is why the fix is read even when the order list
       // below is empty.
-      final reported = await _postDriverLocation(token, position);
+      final outcome = await _postDriverLocation(token, position);
+
+      // The backend refusing the token is not a tracking failure, and must not
+      // be reported as one: the phone, the GPS and the network are all fine,
+      // and the only fix is logging in again. Leave the failure streak alone
+      // so the settings banner stays down, flag the session for the app, tell
+      // the driver on the notification, and stop — every further post would
+      // be refused the same way.
+      if (outcome == _PostOutcome.unauthorized) {
+        recorded = true;
+        await prefs.setBool(kSessionExpiredKey, true);
+        if (service is AndroidServiceInstance) {
+          await service.setForegroundNotificationInfo(
+            title: _notificationTitle,
+            content: _sessionExpiredText(arabic),
+          );
+        }
+        service.stopSelf();
+        return;
+      }
 
       // Whether the tick counts as a success is decided on the driver-level
       // post alone. It is the one request that happens on every tick, so it is
       // the only one that can tell "this phone has stopped reporting" from
       // "this driver happens to have no orders on".
-      await record(reported: reported);
+      await record(reported: outcome == _PostOutcome.reported);
 
       // The customer gets it only through the orders actually under way —
       // unchanged, and deliberately so. A tracking page must never show a
@@ -494,6 +525,10 @@ String _activeText(bool arabic, DateTime at) {
   return arabic ? 'التتبع يعمل · آخر تحديث $time' : 'Tracking on · last sent $time';
 }
 
+String _sessionExpiredText(bool arabic) => arabic
+    ? 'انتهت الجلسة — افتح التطبيق وسجّل الدخول'
+    : 'Session expired — open the app and log in';
+
 String _stalledText(bool arabic, int streak) {
   // Two misses is 30 seconds, still inside what a tunnel explains. Past that,
   // say so plainly — the driver is the only one who can go and fix it.
@@ -518,12 +553,17 @@ Future<bool> _isArabic([SharedPreferences? loaded]) async {
   }
 }
 
+// What a driver-level location post came back with. The three answers lead
+// to three different things: keep going, count a miss, or give up on the
+// session — so a bool was not enough to carry it.
+enum _PostOutcome { reported, failed, unauthorized }
+
 // Reports where the driver is to the dispatcher's live map, with no order
 // attached. Still best-effort — a failed post must never take down the
 // per-order pings a waiting customer is watching — but it now says whether it
 // worked, because a run of failures here is the app's own early warning that
 // this phone has stopped reporting.
-Future<bool> _postDriverLocation(String token, Position position) async {
+Future<_PostOutcome> _postDriverLocation(String token, Position position) async {
   try {
     final response = await http.post(
       Uri.parse('$_baseUrl/api/drivers/me/location'),
@@ -534,9 +574,12 @@ Future<bool> _postDriverLocation(String token, Position position) async {
       body: jsonEncode(_locationBody(position)),
     ).timeout(_requestTimeout);
 
-    return response.statusCode >= 200 && response.statusCode < 300;
+    if (response.statusCode == 401) return _PostOutcome.unauthorized;
+    return response.statusCode >= 200 && response.statusCode < 300
+        ? _PostOutcome.reported
+        : _PostOutcome.failed;
   } catch (_) {
-    return false;
+    return _PostOutcome.failed;
   }
 }
 

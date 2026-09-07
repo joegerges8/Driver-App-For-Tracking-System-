@@ -138,6 +138,40 @@ class _LoginScreenState extends State<LoginScreen> {
                     l10n.enterCredentials,
                     style: TextStyle(color: Colors.grey[500], fontSize: 13),
                   ),
+                  // Why they are here, when the backend ended the session
+                  // rather than them. Without it a driver who did nothing
+                  // wrong is dropped on the login screen with no explanation.
+                  if (auth.sessionExpired) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: buttonSecondaryColor,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline,
+                              color: buttonMainColor, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              l10n.sessionExpired,
+                              style: TextStyle(
+                                color: buttonMainColor,
+                                fontSize: 13,
+                                height: 1.3,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 28),
                   AuthInputField(
                     controller: _emailController,

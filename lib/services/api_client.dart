@@ -32,6 +32,26 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 class ApiClient {
   static Uri _uri(String path) => Uri.parse('${ApiConfig.baseUrl}$path');
 
+  // Called when the backend refuses the stored token.
+  //
+  // Driver tokens expire 30 days after login, and nothing in the app used to
+  // notice: the token stayed in SharedPreferences, every screen showed
+  // "Unauthorized", and the background service's failed location posts were
+  // counted as a phone-settings problem — two drivers with location on and
+  // battery unrestricted were told to check their settings when what they
+  // needed was to log in again. AuthProvider registers itself here so a dead
+  // session ends in the login screen instead.
+  //
+  // Only the requests that carry the session token call it, and only on a
+  // 401. Login and signup answer 401 for a wrong password, and the
+  // change-password endpoint answers 401 for a wrong *current* password; none
+  // of those mean the session is over, so they never reach this.
+  static void Function()? onUnauthorized;
+
+  static void _rejectIfUnauthorized(http.Response res) {
+    if (res.statusCode == 401) onUnauthorized?.call();
+  }
+
   // How long any one request is given before it is called a failure.
   //
   // The http package sets no deadline of its own, so a request whose
@@ -160,9 +180,45 @@ class ApiClient {
       return body;
     }
 
+    _rejectIfUnauthorized(res);
     throw ApiException(
       _errorMessage(body) ?? 'Failed to fetch profile (HTTP ${res.statusCode})',
+      statusCode: res.statusCode,
     );
+  }
+
+  // Trades the current token for a fresh 30-day one via
+  // POST /api/drivers/me/refresh. Called on every app launch so a driver who
+  // opens the app at least once a month never reaches the expiry.
+  //
+  // Returns the new token, or null when the backend could not be reached or
+  // does not have the endpoint yet — both of which leave the existing token in
+  // place. A 401 is the one answer that matters: the token is already dead,
+  // and onUnauthorized fires so the driver is taken to the login screen.
+  static Future<String?> refreshToken({required String token}) async {
+    final http.Response res;
+    try {
+      res = await _send(http.post(
+        _uri('/api/drivers/me/refresh'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      ));
+    } on ApiException {
+      return null;
+    }
+
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      try {
+        final fresh = _decodeJson(res)['token'];
+        if (fresh is String && fresh.isNotEmpty) return fresh;
+      } catch (_) {}
+      return null;
+    }
+
+    _rejectIfUnauthorized(res);
+    return null;
   }
 
   // Fetches the list of completed (DELIVERED) orders for the authenticated driver.
@@ -184,9 +240,11 @@ class ApiClient {
       return [];
     }
 
+    _rejectIfUnauthorized(res);
     final body = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
     throw ApiException(
       _errorMessage(body) ?? 'Failed to fetch completed orders (HTTP ${res.statusCode})',
+      statusCode: res.statusCode,
     );
   }
 
@@ -212,9 +270,11 @@ class ApiClient {
       return [];
     }
 
+    _rejectIfUnauthorized(res);
     final body = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
     throw ApiException(
       _errorMessage(body) ?? 'Failed to fetch returned orders (HTTP ${res.statusCode})',
+      statusCode: res.statusCode,
     );
   }
 
@@ -304,6 +364,9 @@ class ApiClient {
 
     if (res.statusCode >= 200 && res.statusCode < 300) return;
 
+    // The outcome itself is safe: 401 is retryable, so the caller keeps it in
+    // the outbox and it is sent once the driver has logged in again.
+    _rejectIfUnauthorized(res);
     String? message;
     try {
       final body = _decodeJson(res);
@@ -333,12 +396,16 @@ class ApiClient {
 
     if (res.statusCode >= 200 && res.statusCode < 300) return;
 
+    _rejectIfUnauthorized(res);
     String? message;
     try {
       final body = _decodeJson(res);
       message = _errorMessage(body);
     } catch (_) {}
-    throw ApiException(message ?? 'Failed to save note (HTTP ${res.statusCode})');
+    throw ApiException(
+      message ?? 'Failed to save note (HTTP ${res.statusCode})',
+      statusCode: res.statusCode,
+    );
   }
 
   static Future<List<dynamic>> getMyOrders({required String token}) async {
@@ -356,9 +423,11 @@ class ApiClient {
       return [];
     }
 
+    _rejectIfUnauthorized(res);
     final body = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
     throw ApiException(
       _errorMessage(body) ?? 'Failed to fetch orders (HTTP ${res.statusCode})',
+      statusCode: res.statusCode,
     );
   }
 
@@ -435,8 +504,10 @@ class ApiClient {
       throw ApiException('Directions response missing polyline');
     }
 
+    _rejectIfUnauthorized(res);
     throw ApiException(
       _errorMessage(body) ?? 'Failed to fetch directions (HTTP ${res.statusCode})',
+      statusCode: res.statusCode,
     );
   }
 

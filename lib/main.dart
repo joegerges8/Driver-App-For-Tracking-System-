@@ -3,7 +3,9 @@ import 'package:delivery_boy_app/provider/current_location_provider.dart';
 import 'package:delivery_boy_app/provider/delivery_provider.dart';
 import 'package:delivery_boy_app/provider/auth_provider.dart';
 import 'package:delivery_boy_app/provider/locale_provider.dart';
+import 'package:delivery_boy_app/route.dart';
 import 'package:delivery_boy_app/screen/auth_gate.dart';
+import 'package:delivery_boy_app/screen/login_screen.dart';
 import 'package:delivery_boy_app/services/background_location_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -32,7 +34,15 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_)=> DeliveryProvider()),
         // Added in this change:
         // AuthProvider stores JWT + driver profile and persists token.
-        ChangeNotifierProvider(create: (_)=> AuthProvider()),
+        // When the backend stops accepting the stored token (they expire
+        // after 30 days), the driver is taken straight to the login screen,
+        // which tells them why — instead of a home screen that fails to load
+        // and blames their phone's settings.
+        ChangeNotifierProvider(
+          create: (_) => AuthProvider()
+            ..onSessionExpired =
+                () => NavigationHelper.resetTo(const LoginScreen()),
+        ),
         // Added in this change:
         // LocaleProvider holds the English/Arabic choice and loads the saved
         // one from SharedPreferences straight away, so the app opens in the
@@ -45,6 +55,7 @@ class MyApp extends StatelessWidget {
       child: Consumer<LocaleProvider>(
         builder: (context, localeProvider, child) => MaterialApp(
           debugShowCheckedModeBanner: false,
+          navigatorKey: NavigationHelper.navigatorKey,
           locale: localeProvider.locale,
           supportedLocales: AppLocalizations.supportedLocales,
           localizationsDelegates: const [
