@@ -61,6 +61,17 @@ class AppLocalizations {
   String get emailPasswordRequired => _t('emailPasswordRequired');
   String get sessionExpired => _t('sessionExpired');
 
+  // ── Forgot password ───────────────────────────────────────────────────────
+  // The login screen's link, the reset screen it opens, and the profile
+  // screen's way of setting a new password without the current one.
+  String get forgotPassword => _t('forgotPassword');
+  String get resetPassword => _t('resetPassword');
+  String get resetPasswordHint => _t('resetPasswordHint');
+  String get resetPasswordButton => _t('resetPasswordButton');
+  String get passwordResetDone => _t('passwordResetDone');
+  String get forgotCurrentPassword => _t('forgotCurrentPassword');
+  String get backToLogin => _t('backToLogin');
+
   // ── Signup ────────────────────────────────────────────────────────────────
   String get createAccount => _t('createAccount');
   String get joinDeliveryTeam => _t('joinDeliveryTeam');
@@ -270,6 +281,15 @@ class AppLocalizations {
     'emailPasswordRequired': 'Email and password are required',
     'sessionExpired':
         'Your session has expired. Log in again to keep sharing your location.',
+    'forgotPassword': 'Forgot password?',
+    'resetPassword': 'Reset Password',
+    'resetPasswordHint':
+        'Enter the email and phone number you signed up with, then choose a '
+        'new password. Your account and orders stay as they are.',
+    'resetPasswordButton': 'Set New Password',
+    'passwordResetDone': 'Password reset — log in with your new password',
+    'forgotCurrentPassword': 'Forgot your current password?',
+    'backToLogin': 'Back to login',
 
     'createAccount': 'Create Account',
     'joinDeliveryTeam': 'Join the delivery team',
@@ -465,6 +485,15 @@ class AppLocalizations {
     'emailPasswordRequired': 'البريد الإلكتروني وكلمة المرور مطلوبان',
     'sessionExpired':
         'انتهت جلستك. سجّل الدخول مجدداً لمتابعة مشاركة موقعك.',
+    'forgotPassword': 'نسيت كلمة المرور؟',
+    'resetPassword': 'إعادة تعيين كلمة المرور',
+    'resetPasswordHint':
+        'أدخل البريد الإلكتروني ورقم الهاتف اللذين سجّلت بهما، ثم اختر كلمة '
+        'مرور جديدة. حسابك وطلباتك تبقى كما هي.',
+    'resetPasswordButton': 'تعيين كلمة مرور جديدة',
+    'passwordResetDone': 'تمت إعادة التعيين — سجّل الدخول بكلمة المرور الجديدة',
+    'forgotCurrentPassword': 'نسيت كلمة المرور الحالية؟',
+    'backToLogin': 'العودة لتسجيل الدخول',
 
     'createAccount': 'إنشاء حساب',
     'joinDeliveryTeam': 'انضم إلى فريق التوصيل',

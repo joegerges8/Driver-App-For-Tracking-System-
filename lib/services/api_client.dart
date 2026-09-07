@@ -22,6 +22,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 //   POST /api/drivers/signup
 //   POST /api/drivers/login
 //   POST /api/drivers/me/password
+//   POST /api/drivers/me/password/reset            — new password, no current one needed
+//   POST /api/drivers/reset-password               — forgot password: email + phone
 //   GET  /api/drivers/me
 //   GET  /api/drivers/me/orders                    — active assigned orders
 //   GET  /api/drivers/me/orders/completed          — completed (delivered) orders
@@ -164,6 +166,71 @@ class ApiClient {
       message = _errorMessage(body);
     } catch (_) {}
     throw ApiException(message ?? 'Failed to change password (HTTP ${res.statusCode})');
+  }
+
+  // Forgot password, from the login screen. The driver proves the account is
+  // theirs by giving the email and the phone number it was signed up with;
+  // the backend compares the phone by its digits, so the spelling need not
+  // match what they typed months ago.
+  //
+  // Public endpoint, so a 401 here means "email and phone do not match", not
+  // "your session is over" — it deliberately does not go through
+  // _rejectIfUnauthorized. Same goes for the 429 the backend answers after
+  // too many tries on one email: the message is shown as-is.
+  static Future<void> resetForgottenPassword({
+    required String email,
+    required String phone,
+    required String newPassword,
+  }) async {
+    final res = await _send(http.post(
+      _uri('/api/drivers/reset-password'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'email': email,
+        'phone': phone,
+        'new_password': newPassword,
+      }),
+    ));
+
+    if (res.statusCode >= 200 && res.statusCode < 300) return;
+
+    String? message;
+    try {
+      message = _errorMessage(_decodeJson(res));
+    } catch (_) {}
+    throw ApiException(
+      message ?? 'Failed to reset password (HTTP ${res.statusCode})',
+      statusCode: res.statusCode,
+    );
+  }
+
+  // Sets a new password for the logged-in driver without asking for the
+  // current one — the "Forgot your current password?" link on the profile
+  // screen. The token is the proof of identity here.
+  static Future<void> resetOwnPassword({
+    required String token,
+    required String newPassword,
+  }) async {
+    final res = await _send(http.post(
+      _uri('/api/drivers/me/password/reset'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'new_password': newPassword}),
+    ));
+
+    if (res.statusCode >= 200 && res.statusCode < 300) return;
+
+    _rejectIfUnauthorized(res);
+    String? message;
+    try {
+      message = _errorMessage(_decodeJson(res));
+    } catch (_) {}
+    throw ApiException(
+      message ?? 'Failed to reset password (HTTP ${res.statusCode})',
+      statusCode: res.statusCode,
+    );
   }
 
   static Future<Map<String, dynamic>> getMe({required String token}) async {
