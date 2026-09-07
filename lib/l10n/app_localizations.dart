@@ -59,6 +59,7 @@ class AppLocalizations {
   String get dontHaveAccount => _t('dontHaveAccount');
   String get signUp => _t('signUp');
   String get emailPasswordRequired => _t('emailPasswordRequired');
+  String get sessionExpired => _t('sessionExpired');
 
   // ── Signup ────────────────────────────────────────────────────────────────
   String get createAccount => _t('createAccount');
@@ -267,6 +268,8 @@ class AppLocalizations {
     'dontHaveAccount': "Don't have an account?  ",
     'signUp': 'Sign Up',
     'emailPasswordRequired': 'Email and password are required',
+    'sessionExpired':
+        'Your session has expired. Log in again to keep sharing your location.',
 
     'createAccount': 'Create Account',
     'joinDeliveryTeam': 'Join the delivery team',
@@ -460,6 +463,8 @@ class AppLocalizations {
     'dontHaveAccount': 'ليس لديك حساب؟  ',
     'signUp': 'إنشاء حساب',
     'emailPasswordRequired': 'البريد الإلكتروني وكلمة المرور مطلوبان',
+    'sessionExpired':
+        'انتهت جلستك. سجّل الدخول مجدداً لمتابعة مشاركة موقعك.',
 
     'createAccount': 'إنشاء حساب',
     'joinDeliveryTeam': 'انضم إلى فريق التوصيل',

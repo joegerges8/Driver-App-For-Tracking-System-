@@ -86,6 +86,10 @@ class _AppMainScreenState extends State<AppMainScreen>
     if (!mounted) return;
 
     if (state == AppLifecycleState.resumed) {
+      // The background service may have found the session over while the
+      // app was away. Checked first: there is no point polling with a token
+      // the backend has already refused.
+      context.read<AuthProvider>().checkSessionExpiredFlag();
       _startAutoRefresh();
       // Coming back is also when the answer is most likely to have changed:
       // the driver may have just been in Android's settings, or may have been

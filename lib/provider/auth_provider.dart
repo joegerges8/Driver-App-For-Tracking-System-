@@ -11,6 +11,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 class AuthProvider extends ChangeNotifier {
   static const _tokenKey = 'driver_auth_token';
 
+  AuthProvider() {
+    // Any request the backend answers with 401 ends the session here. See
+    // ApiClient.onUnauthorized for why this exists.
+    ApiClient.onUnauthorized = _handleUnauthorized;
+  }
+
   bool _initialized = false;
   bool _isBusy = false;
   // Separate flag from _isBusy so the profile screen can show a lightweight
@@ -20,10 +26,23 @@ class AuthProvider extends ChangeNotifier {
   Map<String, dynamic>? _driver;
   String? _error;
 
+  // True from the moment a session is ended by the backend rather than by the
+  // driver, until they log in again. The login screen reads it to say why
+  // they are looking at it.
+  bool _sessionExpired = false;
+
+  /// Runs after [expireSession] has cleared the token, so whoever owns the
+  /// navigator can put the login screen up. Set from main.dart: the provider
+  /// has no BuildContext of its own, and the main screen is pushed over
+  /// AuthGate on login, so AuthGate rebuilding to the login screen is not
+  /// enough on its own.
+  void Function()? onSessionExpired;
+
   bool get initialized => _initialized;
   bool get isBusy => _isBusy;
   bool get isRefreshingProfile => _isRefreshingProfile;
   bool get isAuthenticated => _token != null && _token!.isNotEmpty;
+  bool get sessionExpired => _sessionExpired;
   String? get token => _token;
   Map<String, dynamic>? get driver => _driver;
   String? get error => _error;
@@ -32,6 +51,17 @@ class AuthProvider extends ChangeNotifier {
     if (_initialized) return;
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString(_tokenKey);
+
+    // The background service found out the session was over while the app
+    // was closed. Honour that before showing anything: the home screen would
+    // only fail to load and blame the phone.
+    if (isAuthenticated && (prefs.getBool(kSessionExpiredKey) ?? false)) {
+      _token = null;
+      _sessionExpired = true;
+      await prefs.remove(_tokenKey);
+      await prefs.remove(kSessionExpiredKey);
+    }
+
     _initialized = true;
     notifyListeners();
 
@@ -45,7 +75,74 @@ class AuthProvider extends ChangeNotifier {
     // name before this lands falls back to leaving it out.
     if (isAuthenticated) {
       unawaited(refreshProfile());
+      unawaited(_renewSession());
     }
+  }
+
+  /// Swaps the stored token for a fresh 30-day one.
+  ///
+  /// Tokens used to run out 30 days after login with nothing renewing them,
+  /// so every driver hit a wall on day 31 whatever they did. Renewing on each
+  /// launch means a driver who opens the app at all in a month never sees it.
+  /// A backend that cannot be reached, or does not have the endpoint yet,
+  /// leaves the current token in place; a 401 has already ended the session
+  /// through the ApiClient hook by the time this returns.
+  Future<void> _renewSession() async {
+    final current = _token;
+    if (current == null || current.isEmpty) return;
+
+    final fresh = await ApiClient.refreshToken(token: current);
+
+    // Logged out, or expired, while the request was in flight.
+    if (fresh == null || _token != current) return;
+
+    _token = fresh;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_tokenKey, fresh);
+    notifyListeners();
+  }
+
+  /// Picks up a session the background service saw end while the app was in
+  /// the background. Called when the app comes back to the foreground.
+  Future<void> checkSessionExpiredFlag() async {
+    if (!isAuthenticated) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload(); // written by the other isolate
+    if (prefs.getBool(kSessionExpiredKey) ?? false) {
+      await expireSession();
+    }
+  }
+
+  void _handleUnauthorized() {
+    unawaited(expireSession());
+  }
+
+  /// Ends a session the backend has stopped accepting.
+  ///
+  /// Differs from [logout] in two ways. It records why, so the login screen
+  /// can tell the driver their session ran out rather than leaving them to
+  /// wonder what they did. And it keeps the started-order lists: the same
+  /// driver is about to log straight back in, and their deliveries should
+  /// carry on streaming to the customers watching them. (If a different
+  /// driver logs in instead, the backend answers 404 for orders that are not
+  /// theirs and the service drops them on the first tick.)
+  ///
+  /// The background service stops itself on its next tick when it finds no
+  /// token, the same way it does after a logout.
+  Future<void> expireSession() async {
+    if (!isAuthenticated) return;
+
+    _token = null;
+    _driver = null;
+    _error = null;
+    _sessionExpired = true;
+    notifyListeners();
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_tokenKey);
+    await prefs.remove(kSessionExpiredKey);
+
+    onSessionExpired?.call();
   }
 
   Future<void> login({required String email, required String password}) async {
@@ -60,12 +157,14 @@ class AuthProvider extends ChangeNotifier {
       }
 
       _token = token;
+      _sessionExpired = false;
       _driver = res['driver'] is Map<String, dynamic>
           ? (res['driver'] as Map<String, dynamic>)
           : null;
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_tokenKey, token);
+      await prefs.remove(kSessionExpiredKey);
     } catch (e) {
       _error = e.toString();
       rethrow;
@@ -97,12 +196,14 @@ class AuthProvider extends ChangeNotifier {
       }
 
       _token = token;
+      _sessionExpired = false;
       _driver = res['driver'] is Map<String, dynamic>
           ? (res['driver'] as Map<String, dynamic>)
           : null;
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_tokenKey, token);
+      await prefs.remove(kSessionExpiredKey);
     } catch (e) {
       _error = e.toString();
       rethrow;
@@ -153,6 +254,7 @@ class AuthProvider extends ChangeNotifier {
     _token = null;
     _driver = null;
     _error = null;
+    _sessionExpired = false;
     notifyListeners();
 
     // Stops location sharing along with the session. The service does stop
@@ -163,6 +265,7 @@ class AuthProvider extends ChangeNotifier {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
+    await prefs.remove(kSessionExpiredKey);
   }
 
   void _setBusy(bool value) {
